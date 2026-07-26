@@ -1,0 +1,42 @@
+name: edutech_hom
+description: EdTech Live Tutoring App - Flutter Frontend (Riverpod + go_router edition)
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # State management
+  flutter_riverpod: ^2.5.1
+
+  # Routing
+  go_router: ^14.2.7
+
+  # Networking
+  dio: ^5.5.0+1
+
+  # Auth & secure storage
+  flutter_secure_storage: ^9.2.2
+
+  # Media & files
+  cached_network_image: ^3.4.1
+  image_picker: ^1.1.2
+  file_picker: ^8.1.2
+  url_launcher: ^6.3.1
+
+  # UI
+  google_fonts: ^6.2.1
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
