@@ -13,72 +13,74 @@
 /// so it works from emulators, simulators and physical devices alike.
 class ApiConfig {
   ApiConfig._();
-
+  
   /// Change this single value to point the app at your backend.
-  static const String host = 'http://192.168.251.196:8000';
-
+  static const String host = 'http://192.168.183.196:8000';
+  
   static const String apiBase = '$host/api';
   static const String mediaBase = host;
-
+  
   // Auth
   static const String login = '/auth/login/';
   static const String refresh = '/auth/refresh/';
-
+  
   // Users
   static const String register = '/users/register/';
   static const String profile = '/users/profile/';
   static const String teachers = '/users/teachers/';
   static String teacherApprove(String id) => '/users/teachers/$id/approve/';
-
+  
   // Courses
   static const String courses = '/courses/';
   static const String courseCreate = '/courses/create/';
   static String courseDetail(String id) => '/courses/$id/';
   static const String moduleCreate = '/courses/modules/create/';
   static const String lessonCreate = '/courses/lessons/create/';
-
+  
   // Enrollments
   static const String myEnrollments = '/enrollments/my/';
   static const String enrollmentCreate = '/enrollments/create/';
   static const String progressUpdate = '/enrollments/progress/';
-
+  
   // Live classes
   static const String liveClasses = '/live-classes/';
   static const String liveClassCreate = '/live-classes/create/';
   static String liveClassChat(String liveClassId) =>
-      '/live-classes/$liveClassId/chat/';
-
+  '/live-classes/$liveClassId/chat/';
+  static String liveClassJitsiToken(String liveClassId) =>
+  '/live-classes/$liveClassId/jitsi-token/';
+  
   // Chat
   static const String chatRooms = '/chat/rooms/';
   static String chatMessages(String roomId) => '/chat/rooms/$roomId/messages/';
-
+  
   // Notifications
   static const String notifications = '/notifications/';
   static String notificationRead(String id) => '/notifications/$id/read/';
-
+  
   // Assessments
   static const String quizzes = '/assessments/';
   static const String quizAttempt = '/assessments/attempt/';
   static const String certificates = '/assessments/certificates/';
-
+  
   // Resources
   static const String resources = '/resources/';
   static const String resourceUpload = '/resources/upload/';
   static const String myDownloads = '/resources/downloads/';
-
+  
   // Payments
   static const String payments = '/payments/';
   static const String paymentCreate = '/payments/create/';
   static const String wallet = '/payments/wallet/';
-
+  
   // Analytics
   static const String dashboard = '/analytics/dashboard/';
-
+  
   /// Resolves a possibly-relative media URL (e.g. "/media/courses/x.png")
   /// returned by Django into an absolute URL the app can load.
   static String resolveMediaUrl(String? url) {
     if (url == null || url.isEmpty) return '';
     if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    return '$mediaBase$url';
+      return '$mediaBase$url';
   }
 }
