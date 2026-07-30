@@ -12,7 +12,7 @@ class LiveClass {
     this.status = 'scheduled',
     this.createdAt,
   });
-
+  
   final String id;
   final String teacherId;
   final String title;
@@ -22,10 +22,10 @@ class LiveClass {
   final String roomId;
   final String status; // scheduled | live | ended
   final DateTime? createdAt;
-
+  
   bool get isLive => status == 'live';
   bool get isEnded => status == 'ended';
-
+  
   factory LiveClass.fromJson(Map<String, dynamic> json) {
     return LiveClass(
       id: parseString(json['id']),
@@ -41,6 +41,32 @@ class LiveClass {
   }
 }
 
+/// Short-lived credentials for joining a live class's Jitsi room.
+/// `isModerator` is true only for the class teacher (or an admin) and is
+/// what unlocks Jitsi's built-in per-participant mute/unmute controls.
+class JitsiCredentials {
+  JitsiCredentials({
+    required this.domain,
+    required this.room,
+    required this.token,
+    required this.isModerator,
+  });
+  
+  final String domain;
+  final String room;
+  final String token;
+  final bool isModerator;
+  
+  factory JitsiCredentials.fromJson(Map<String, dynamic> json) {
+    return JitsiCredentials(
+      domain: parseString(json['domain']),
+      room: parseString(json['room']),
+      token: parseString(json['token']),
+      isModerator: json['is_moderator'] == true,
+    );
+  }
+}
+
 class LiveChatMessage {
   LiveChatMessage({
     required this.id,
@@ -49,13 +75,13 @@ class LiveChatMessage {
     required this.message,
     this.createdAt,
   });
-
+  
   final String id;
   final String liveClassId;
   final String userId;
   final String message;
   final DateTime? createdAt;
-
+  
   factory LiveChatMessage.fromJson(Map<String, dynamic> json) {
     return LiveChatMessage(
       id: parseString(json['id']),

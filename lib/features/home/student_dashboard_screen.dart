@@ -31,7 +31,7 @@ class StudentDashboardScreen extends ConsumerWidget {
           padding: const EdgeInsets.all(20),
           children: [
             Text(
-              'Hi, ${user.firstName.isNotEmpty ? user.firstName : user.username} 👋',
+              'Hi, ${user.firstName.isNotEmpty ? user.firstName : user.username}',
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 4),
