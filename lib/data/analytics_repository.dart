@@ -22,10 +22,16 @@ class AnalyticsRepository {
     return PaginatedResponse.fromDynamic(response.data, TeacherProfile.fromJson);
   }
 
-  /// NOTE: the backend's TeacherApprovalView is a POST with no body and
-  /// requires Django is_staff (not just role == 'admin'). It also only
-  /// returns a confirmation message, not the updated profile — there is
-  /// currently no endpoint to list *unapproved* teachers either.
+  /// Admin-only: teachers awaiting approval.
+  Future<List<TeacherProfile>> listPendingTeachers() async {
+    final response = await _api.get(ApiConfig.pendingTeachers);
+    final data = response.data;
+    final results = data is Map<String, dynamic> ? (data['results'] ?? data) : data;
+    return (results as List)
+        .map((e) => TeacherProfile.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<void> approveTeacher(String teacherProfileId) async {
     await _api.post(ApiConfig.teacherApprove(teacherProfileId));
   }

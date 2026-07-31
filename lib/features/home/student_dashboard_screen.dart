@@ -10,6 +10,7 @@ import '../../providers/course_providers.dart';
 import '../../providers/dashboard_providers.dart';
 import '../../providers/enrollment_providers.dart';
 import '../courses/widgets/course_card.dart';
+import 'notification_bell_action.dart';
 
 class StudentDashboardScreen extends ConsumerWidget {
   const StudentDashboardScreen({super.key});
@@ -21,7 +22,7 @@ class StudentDashboardScreen extends ConsumerWidget {
     final enrollmentsAsync = ref.watch(myEnrollmentsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Home')),
+      appBar: AppBar(title: const Text('Home'), actions: const [NotificationBellAction()]),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(dashboardStatsProvider);
@@ -31,7 +32,7 @@ class StudentDashboardScreen extends ConsumerWidget {
           padding: const EdgeInsets.all(20),
           children: [
             Text(
-              'Hi, ${user.firstName.isNotEmpty ? user.firstName : user.username}',
+              'Hi, ${user.firstName.isNotEmpty ? user.firstName : user.username} 👋',
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 4),

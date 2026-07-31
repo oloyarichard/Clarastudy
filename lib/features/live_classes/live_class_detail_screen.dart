@@ -13,9 +13,9 @@ import 'jitsi_meeting_screen.dart';
 
 class LiveClassDetailScreen extends ConsumerStatefulWidget {
   const LiveClassDetailScreen({super.key, required this.liveClassId});
-  
+
   final String liveClassId;
-  
+
   @override
   ConsumerState<LiveClassDetailScreen> createState() => _LiveClassDetailScreenState();
 }
@@ -24,13 +24,34 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
   final _messageController = TextEditingController();
   bool _sending = false;
   bool _joining = false;
-  
+  bool _starting = false;
+
+  Future<void> _startClass() async {
+    setState(() => _starting = true);
+    try {
+      await ref.read(liveClassRepositoryProvider).startLiveClass(widget.liveClassId);
+      ref.invalidate(liveClassesListProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Class started — students can now join.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        final message = e is ApiException ? e.message : 'Could not start the class.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
   Future<void> _joinCall(String title) async {
     setState(() => _joining = true);
     try {
       final creds = await ref
-      .read(liveClassRepositoryProvider)
-      .getJitsiCredentials(widget.liveClassId);
+          .read(liveClassRepositoryProvider)
+          .getJitsiCredentials(widget.liveClassId);
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
@@ -44,28 +65,32 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
       );
     } catch (e) {
       if (mounted) {
-        final message = e is ApiException ? e.message : 'Could not join the call.';
+        String message = 'Could not join the call.';
+        if (e is ApiException) {
+          final backendError = e.fieldErrors?['error'];
+          message = backendError is String ? backendError : e.message;
+        }
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
       if (mounted) setState(() => _joining = false);
     }
   }
-  
+
   @override
   void dispose() {
     _messageController.dispose();
     super.dispose();
   }
-  
+
   Future<void> _send() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
     setState(() => _sending = true);
     try {
       await ref
-      .read(liveClassRepositoryProvider)
-      .sendLiveChat(liveClassId: widget.liveClassId, message: text);
+          .read(liveClassRepositoryProvider)
+          .sendLiveChat(liveClassId: widget.liveClassId, message: text);
       _messageController.clear();
       ref.invalidate(liveChatProvider(widget.liveClassId));
     } catch (e) {
@@ -77,13 +102,13 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
       if (mounted) setState(() => _sending = false);
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final classesAsync = ref.watch(liveClassesListProvider);
     final chatAsync = ref.watch(liveChatProvider(widget.liveClassId));
     final user = ref.watch(authProvider).user;
-    
+
     return Scaffold(
       appBar: AppBar(title: const Text('Live class')),
       body: classesAsync.when(
@@ -94,7 +119,7 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
             return const ErrorView(message: 'This live class could not be found.');
           }
           final formatter = DateFormat('EEEE, MMM d · h:mm a');
-          
+
           return Column(
             children: [
               Container(
@@ -108,7 +133,7 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
                       children: [
                         Expanded(
                           child: Text(liveClass.title,
-                                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                         ),
                         StatusChip(
                           label: liveClass.status == 'live' ? '● LIVE' : liveClass.status,
@@ -119,22 +144,40 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
                     if (liveClass.description != null) ...[
                       const SizedBox(height: 8),
                       Text(liveClass.description!,
-                           style: const TextStyle(color: AppColors.textSecondary)),
+                          style: const TextStyle(color: AppColors.textSecondary)),
                     ],
                     const SizedBox(height: 12),
                     if (liveClass.scheduledAt != null)
                       Text(formatter.format(liveClass.scheduledAt!.toLocal()),
-                      style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-                      const SizedBox(height: 16),
-                      PrimaryButton(
+                          style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                    const SizedBox(height: 16),
+                    Builder(builder: (context) {
+                      final user = ref.watch(authProvider).user;
+                      final isTeacher = user?.id == liveClass.teacherId;
+
+                      if (isTeacher && liveClass.status == 'scheduled') {
+                        return PrimaryButton(
+                          label: _starting ? 'Starting…' : 'Start class',
+                          icon: Icons.play_circle_fill_rounded,
+                          onPressed: _starting ? null : _startClass,
+                        );
+                      }
+                      if (!isTeacher && liveClass.status == 'scheduled') {
+                        return const StatusChip(
+                          label: 'Waiting for the teacher to start the class',
+                          color: AppColors.secondary,
+                        );
+                      }
+                      return PrimaryButton(
                         label: liveClass.isEnded
-                        ? 'Class ended'
-                      : (_joining ? 'Joining…' : 'Join room · ${liveClass.roomId}'),
-                      icon: Icons.videocam_rounded,
-                      onPressed: (liveClass.isEnded || _joining)
-                      ? null
-                      : () => _joinCall(liveClass.title),
-                      ),
+                            ? 'Class ended'
+                            : (_joining ? 'Joining…' : 'Join room · ${liveClass.roomId}'),
+                        icon: Icons.videocam_rounded,
+                        onPressed: (liveClass.isEnded || _joining)
+                            ? null
+                            : () => _joinCall(liveClass.title),
+                      );
+                    }),
                   ],
                 ),
               ),
@@ -164,8 +207,8 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
                             ),
                             decoration: BoxDecoration(
                               color: isMine
-                              ? AppColors.primary
-                              : AppColors.cardLight,
+                                  ? AppColors.primary
+                                  : AppColors.cardLight,
                               borderRadius: BorderRadius.circular(14),
                               border: isMine ? null : Border.all(color: AppColors.border),
                             ),

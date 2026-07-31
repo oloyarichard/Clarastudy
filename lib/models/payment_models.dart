@@ -50,3 +50,32 @@ class Wallet {
     );
   }
 }
+
+class WalletTopUpRequest {
+  WalletTopUpRequest({
+    required this.id,
+    required this.userId,
+    required this.amount,
+    required this.momoReference,
+    this.status = 'pending',
+    this.createdAt,
+  });
+
+  final String id;
+  final String userId;
+  final double amount;
+  final String momoReference;
+  final String status; // pending | approved | rejected
+  final DateTime? createdAt;
+
+  factory WalletTopUpRequest.fromJson(Map<String, dynamic> json) {
+    return WalletTopUpRequest(
+      id: parseString(json['id']),
+      userId: parseString(json['user']),
+      amount: parseDouble(json['amount']),
+      momoReference: parseString(json['momo_reference']),
+      status: parseString(json['status'], fallback: 'pending'),
+      createdAt: parseDate(json['created_at']),
+    );
+  }
+}

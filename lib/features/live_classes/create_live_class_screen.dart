@@ -6,8 +6,10 @@ import 'package:intl/intl.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_widgets.dart';
+import '../../models/course_models.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/core_providers.dart';
+import '../../providers/course_providers.dart';
 import '../../providers/live_class_providers.dart';
 
 class CreateLiveClassScreen extends ConsumerStatefulWidget {
@@ -23,6 +25,7 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
   final _descriptionController = TextEditingController();
   final _durationController = TextEditingController(text: '60');
   DateTime _scheduledAt = DateTime.now().add(const Duration(hours: 1));
+  String? _selectedCourseId;
   bool _submitting = false;
 
   @override
@@ -55,12 +58,19 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
     if (!_formKey.currentState!.validate()) return;
     final user = ref.read(authProvider).user;
     if (user == null) return;
+    if (_selectedCourseId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pick which course this class is for.')),
+      );
+      return;
+    }
 
     setState(() => _submitting = true);
     try {
       final roomId = 'room-${DateTime.now().millisecondsSinceEpoch}';
       await ref.read(liveClassRepositoryProvider).createLiveClass(
             teacherId: user.id,
+            courseId: _selectedCourseId!,
             title: _titleController.text.trim(),
             description: _descriptionController.text.trim(),
             scheduledAt: _scheduledAt,
@@ -98,6 +108,39 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const Text('Course', style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Consumer(
+                  builder: (context, ref, _) {
+                    final user = ref.watch(authProvider).user;
+                    if (user == null) return const SizedBox.shrink();
+                    final coursesAsync = ref.watch(myTaughtCoursesProvider(user.id));
+                    return coursesAsync.when(
+                      data: (courses) {
+                        if (courses.isEmpty) {
+                          return const Text(
+                            'Create a course first — a live class must belong to one.',
+                            style: TextStyle(color: AppColors.textSecondary),
+                          );
+                        }
+                        return DropdownButtonFormField<String>(
+                          initialValue: _selectedCourseId,
+                          decoration: const InputDecoration(
+                            hintText: 'Only students enrolled in this course can join',
+                          ),
+                          items: courses
+                              .map((Course c) => DropdownMenuItem(value: c.id, child: Text(c.title)))
+                              .toList(),
+                          onChanged: (value) => setState(() => _selectedCourseId = value),
+                          validator: (v) => v == null ? 'Pick a course' : null,
+                        );
+                      },
+                      loading: () => const LinearProgressIndicator(),
+                      error: (e, __) => Text('$e', style: const TextStyle(color: AppColors.error)),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
                 AppTextField(
                   controller: _titleController,
                   label: 'Class title',

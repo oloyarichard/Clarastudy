@@ -13,6 +13,8 @@ import '../../features/courses/course_detail_screen.dart';
 import '../../features/courses/course_list_screen.dart';
 import '../../features/courses/create_course_screen.dart';
 import '../../features/home/home_shell.dart';
+import '../../features/home/pending_teachers_screen.dart';
+import '../../features/home/pending_topups_screen.dart';
 import '../../features/home/teachers_list_screen.dart';
 import '../../features/live_classes/create_live_class_screen.dart';
 import '../../features/live_classes/live_class_detail_screen.dart';
@@ -138,6 +140,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/teachers',
         builder: (context, state) => const TeachersListScreen(),
+      ),
+      GoRoute(
+        path: '/admin/pending-teachers',
+        builder: (context, state) => const PendingTeachersScreen(),
+      ),
+      GoRoute(
+        path: '/admin/pending-topups',
+        builder: (context, state) => const PendingTopUpsScreen(),
       ),
       GoRoute(
         path: '/profile/edit',

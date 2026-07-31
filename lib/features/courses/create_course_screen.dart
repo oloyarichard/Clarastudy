@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/network/api_exception.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/app_constants.dart';
 import '../../core/widgets/app_widgets.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/core_providers.dart';
@@ -24,7 +25,7 @@ class _CreateCourseScreenState extends ConsumerState<CreateCourseScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _priceController = TextEditingController(text: '0');
+  double _price = CoursePriceTiers.values.first;
   String _level = 'beginner';
   XFile? _thumbnail;
   bool _submitting = false;
@@ -33,7 +34,6 @@ class _CreateCourseScreenState extends ConsumerState<CreateCourseScreen> {
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
-    _priceController.dispose();
     super.dispose();
   }
 
@@ -54,7 +54,7 @@ class _CreateCourseScreenState extends ConsumerState<CreateCourseScreen> {
             description: _descriptionController.text.trim(),
             teacherId: user.id,
             level: _level,
-            price: double.tryParse(_priceController.text.trim()) ?? 0,
+            price: _price,
             thumbnailPath: _thumbnail?.path,
           );
       ref.invalidate(myTaughtCoursesProvider(user.id));
@@ -139,11 +139,24 @@ class _CreateCourseScreenState extends ConsumerState<CreateCourseScreen> {
                   }).toList(),
                 ),
                 const SizedBox(height: 16),
-                AppTextField(
-                  controller: _priceController,
-                  label: 'Price (USD, 0 for free)',
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  prefixIcon: Icons.attach_money_rounded,
+                const Text('Price', style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: CoursePriceTiers.values.map((tier) {
+                    final selected = _price == tier;
+                    return ChoiceChip(
+                      label: Text(tier == 0 ? 'Free' : '\$${tier.toStringAsFixed(2)}'),
+                      selected: selected,
+                      onSelected: (_) => setState(() => _price = tier),
+                      selectedColor: AppColors.primary.withOpacity(0.15),
+                      labelStyle: TextStyle(
+                        color: selected ? AppColors.primary : AppColors.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    );
+                  }).toList(),
                 ),
                 const SizedBox(height: 28),
                 PrimaryButton(

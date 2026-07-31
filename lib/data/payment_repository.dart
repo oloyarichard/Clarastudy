@@ -36,4 +36,32 @@ class PaymentRepository {
     final response = await _api.get(ApiConfig.wallet);
     return Wallet.fromJson(response.data as Map<String, dynamic>);
   }
+
+  /// Submits a mobile-money top-up request for an admin to manually review
+  /// and approve, after the student has sent money to the platform's
+  /// mobile money wallet outside the app.
+  Future<void> submitTopUpRequest({
+    required double amount,
+    required String momoReference,
+  }) async {
+    await _api.post(ApiConfig.walletTopUp, data: {
+      'amount': amount,
+      'momo_reference': momoReference,
+    });
+  }
+
+  /// Admin-only: top-up requests still awaiting review.
+  Future<List<WalletTopUpRequest>> listPendingTopUps() async {
+    final response = await _api.get(ApiConfig.pendingTopUps);
+    final data = response.data;
+    final results = data is Map<String, dynamic> ? (data['results'] ?? data) : data;
+    return (results as List)
+        .map((e) => WalletTopUpRequest.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Admin-only: approve credits the student's wallet; reject just closes it.
+  Future<void> reviewTopUp(String topUpId, {required bool approve}) async {
+    await _api.post(ApiConfig.reviewTopUp(topUpId), data: {'approve': approve});
+  }
 }

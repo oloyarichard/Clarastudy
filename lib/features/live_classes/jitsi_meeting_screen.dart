@@ -26,11 +26,11 @@ class JitsiMeetingScreen extends ConsumerStatefulWidget {
     required this.liveClassTitle,
     required this.credentials,
   });
-  
+
   final String liveClassId;
   final String liveClassTitle;
   final JitsiCredentials credentials;
-  
+
   @override
   ConsumerState<JitsiMeetingScreen> createState() => _JitsiMeetingScreenState();
 }
@@ -38,32 +38,33 @@ class JitsiMeetingScreen extends ConsumerStatefulWidget {
 class _JitsiMeetingScreenState extends ConsumerState<JitsiMeetingScreen> {
   final _jitsiMeet = JitsiMeet();
   bool _ended = false;
-  
+
   @override
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     WidgetsBinding.instance.addPostFrameCallback((_) => _join());
   }
-  
+
   @override
   void dispose() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
-  
+
   Future<void> _join() async {
     final creds = widget.credentials;
     final user = ref.read(authProvider).user;
-    
+
     final options = JitsiMeetConferenceOptions(
       serverURL: 'https://${creds.domain}',
       room: creds.room,
-      token: creds.token,
       configOverrides: {
-        // Teacher moderation lives entirely in Jitsi's native participants
-        // panel once the JWT carries `moderator: true` — no extra UI needed
-        // here for mute/unmute.
+        // On the public meet.jit.si server there's no JWT/moderator claim.
+        // Whoever's client joins the room first becomes moderator, which
+        // is why the backend refuses students until the teacher has
+        // started the class (see LiveClassJitsiTokenView) — that's what
+        // actually guarantees the teacher gets moderator rights here.
         'startWithAudioMuted': !creds.isModerator,
         'startWithVideoMuted': false,
         'prejoinPageEnabled': true,
@@ -97,21 +98,21 @@ class _JitsiMeetingScreenState extends ConsumerState<JitsiMeetingScreen> {
         email: user?.email,
       ),
     );
-    
+
     final listener = JitsiMeetEventListener(
       conferenceTerminated: (url, error) => _leave(),
       readyToClose: () => _leave(),
     );
-    
+
     await _jitsiMeet.join(options, listener);
   }
-  
+
   void _leave() {
     if (_ended) return;
     _ended = true;
     if (mounted) Navigator.of(context).maybePop();
   }
-  
+
   void _openAppChat() {
     showModalBottomSheet(
       context: context,
@@ -120,7 +121,7 @@ class _JitsiMeetingScreenState extends ConsumerState<JitsiMeetingScreen> {
       builder: (_) => _LiveClassChatSheet(liveClassId: widget.liveClassId),
     );
   }
-  
+
   @override
   Widget build(BuildContext context) {
     // Jitsi's native view fills the screen behind this; this Scaffold just
@@ -150,9 +151,9 @@ class _JitsiMeetingScreenState extends ConsumerState<JitsiMeetingScreen> {
 /// the Jitsi call is running instead of using Jitsi's built-in chat.
 class _LiveClassChatSheet extends ConsumerStatefulWidget {
   const _LiveClassChatSheet({required this.liveClassId});
-  
+
   final String liveClassId;
-  
+
   @override
   ConsumerState<_LiveClassChatSheet> createState() => _LiveClassChatSheetState();
 }
@@ -160,40 +161,45 @@ class _LiveClassChatSheet extends ConsumerStatefulWidget {
 class _LiveClassChatSheetState extends ConsumerState<_LiveClassChatSheet> {
   final _controller = TextEditingController();
   bool _sending = false;
-  
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
-  
+
   Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
     setState(() => _sending = true);
     try {
       await ref
-      .read(liveClassRepositoryProvider)
-      .sendLiveChat(liveClassId: widget.liveClassId, message: text);
+          .read(liveClassRepositoryProvider)
+          .sendLiveChat(liveClassId: widget.liveClassId, message: text);
       _controller.clear();
       ref.invalidate(liveChatProvider(widget.liveClassId));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final chatAsync = ref.watch(liveChatProvider(widget.liveClassId));
     final user = ref.watch(authProvider).user;
-    
+
     return DraggableScrollableSheet(
-      initialChildSize: 0.55,
-      minChildSize: 0.3,
-      maxChildSize: 0.9,
+      initialChildSize: 0.75,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
       expand: false,
       builder: (context, scrollController) {
-        return Container(
+        return Padding(
+          // Without this, the on-screen keyboard covers the message input
+          // instead of pushing the sheet up — that's what made the chat
+          // feel cramped.
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Container(
           decoration: const BoxDecoration(
             color: AppColors.cardLight,
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -266,6 +272,7 @@ class _LiveClassChatSheetState extends ConsumerState<_LiveClassChatSheet> {
                 ),
               ),
             ],
+          ),
           ),
         );
       },

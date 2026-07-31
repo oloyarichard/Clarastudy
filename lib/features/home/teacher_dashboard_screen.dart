@@ -9,6 +9,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/course_providers.dart';
 import '../../providers/dashboard_providers.dart';
 import '../courses/widgets/course_card.dart';
+import 'notification_bell_action.dart';
 
 class TeacherDashboardScreen extends ConsumerWidget {
   const TeacherDashboardScreen({super.key});
@@ -20,7 +21,10 @@ class TeacherDashboardScreen extends ConsumerWidget {
     final myCoursesAsync = ref.watch(myTaughtCoursesProvider(user.id));
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Teacher Dashboard')),
+      appBar: AppBar(
+        title: const Text('Teacher Dashboard'),
+        actions: const [NotificationBellAction()],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         heroTag: 'create-course-fab',
         onPressed: () => context.push('/courses/create'),

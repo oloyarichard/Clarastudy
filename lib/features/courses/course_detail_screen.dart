@@ -13,6 +13,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/core_providers.dart';
 import '../../providers/course_providers.dart';
 import '../../providers/enrollment_providers.dart';
+import '../../providers/payment_providers.dart';
 import '../../providers/assessment_providers.dart';
 import '../assessments/quiz_attempt_screen.dart';
 
@@ -31,28 +32,123 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
   Future<void> _enroll(Course course) async {
     final user = ref.read(authProvider).user;
     if (user == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirm payment'),
+        content: Text(
+          course.isFree
+              ? 'Enroll in "${course.title}" for free?'
+              : '${course.price.toStringAsFixed(2)} will be deducted from your '
+                'wallet to enroll in "${course.title}". Continue?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirm')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
     setState(() => _enrolling = true);
     try {
-      await ref.read(enrollmentRepositoryProvider).enroll(
-            courseId: course.id,
-            studentId: user.id,
-            pricePaid: course.price,
-          );
+      await ref.read(enrollmentRepositoryProvider).enrollAndPay(courseId: course.id);
       ref.invalidate(myEnrollmentsProvider);
       ref.invalidate(isEnrolledProvider(course.id));
+      ref.invalidate(walletProvider);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Enrolled! Happy learning 🎉')),
         );
       }
+    } on ApiException catch (e) {
+      if (e.statusCode == 402) {
+        if (mounted) await _showTopUpDialog(e.fieldErrors);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } catch (e) {
       if (mounted) {
-        final message = e is ApiException ? e.message : 'Could not enroll right now.';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not enroll right now.')),
+        );
       }
     } finally {
       if (mounted) setState(() => _enrolling = false);
     }
+  }
+
+  /// Shown when the backend reports insufficient wallet balance (HTTP 402).
+  /// Walks the student through sending money to the platform's mobile
+  /// money wallet, then submits a top-up request for an admin to approve.
+  Future<void> _showTopUpDialog(Map<String, dynamic>? details) async {
+    final momoNumber = details?['momo_wallet_number']?.toString() ?? '';
+    final shortfall = details?['shortfall']?.toString() ?? '';
+    final refController = TextEditingController();
+    final amountController = TextEditingController(text: shortfall);
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Top up your wallet'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Your wallet balance is too low. Send at least $shortfall to '
+              '$momoNumber via mobile money, then enter the transaction '
+              'reference below. An admin will review and credit your wallet.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Amount sent'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: refController,
+              decoration: const InputDecoration(labelText: 'Mobile money reference'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final amount = double.tryParse(amountController.text.trim()) ?? 0;
+              if (amount <= 0 || refController.text.trim().isEmpty) return;
+              try {
+                await ref.read(paymentRepositoryProvider).submitTopUpRequest(
+                      amount: amount,
+                      momoReference: refController.text.trim(),
+                    );
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Top-up request submitted — an admin will review it shortly.'),
+                    ),
+                  );
+                }
+              } catch (_) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Could not submit top-up request.')),
+                  );
+                }
+              }
+            },
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

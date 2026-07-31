@@ -25,3 +25,13 @@ class UserRole {
   static const String teacher = 'teacher';
   static const String admin = 'admin';
 }
+
+/// The only prices a course can be created at. Teachers pick one of these
+/// rather than typing an arbitrary number — keeps pricing predictable for
+/// the payment/wallet-split flow and avoids odd values mobile money can't
+/// cleanly represent.
+class CoursePriceTiers {
+  CoursePriceTiers._();
+
+  static const List<double> values = [0, 4.99, 9.99, 19.99, 29.99, 49.99, 99.99];
+}

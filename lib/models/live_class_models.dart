@@ -4,6 +4,7 @@ class LiveClass {
   LiveClass({
     required this.id,
     required this.teacherId,
+    required this.courseId,
     required this.title,
     this.description,
     required this.scheduledAt,
@@ -12,9 +13,10 @@ class LiveClass {
     this.status = 'scheduled',
     this.createdAt,
   });
-  
+
   final String id;
   final String teacherId;
+  final String courseId;
   final String title;
   final String? description;
   final DateTime? scheduledAt;
@@ -22,14 +24,15 @@ class LiveClass {
   final String roomId;
   final String status; // scheduled | live | ended
   final DateTime? createdAt;
-  
+
   bool get isLive => status == 'live';
   bool get isEnded => status == 'ended';
-  
+
   factory LiveClass.fromJson(Map<String, dynamic> json) {
     return LiveClass(
       id: parseString(json['id']),
       teacherId: parseString(json['teacher']),
+      courseId: parseString(json['course']),
       title: parseString(json['title']),
       description: json['description'] as String?,
       scheduledAt: parseDate(json['scheduled_at']),
@@ -41,27 +44,27 @@ class LiveClass {
   }
 }
 
-/// Short-lived credentials for joining a live class's Jitsi room.
-/// `isModerator` is true only for the class teacher (or an admin) and is
-/// what unlocks Jitsi's built-in per-participant mute/unmute controls.
+/// Room info for joining a live class's Jitsi call. We're on the public
+/// meet.jit.si server, so there's no JWT — access control (who's even
+/// allowed to fetch this) is enforced entirely by the backend before this
+/// ever gets returned. `isModerator` is a UI hint for the app itself (e.g.
+/// which controls to show); actual Jitsi moderator status on the public
+/// server goes to whoever's client joins the room first.
 class JitsiCredentials {
   JitsiCredentials({
     required this.domain,
     required this.room,
-    required this.token,
     required this.isModerator,
   });
-  
+
   final String domain;
   final String room;
-  final String token;
   final bool isModerator;
-  
+
   factory JitsiCredentials.fromJson(Map<String, dynamic> json) {
     return JitsiCredentials(
       domain: parseString(json['domain']),
       room: parseString(json['room']),
-      token: parseString(json['token']),
       isModerator: json['is_moderator'] == true,
     );
   }
@@ -75,13 +78,13 @@ class LiveChatMessage {
     required this.message,
     this.createdAt,
   });
-  
+
   final String id;
   final String liveClassId;
   final String userId;
   final String message;
   final DateTime? createdAt;
-  
+
   factory LiveChatMessage.fromJson(Map<String, dynamic> json) {
     return LiveChatMessage(
       id: parseString(json['id']),

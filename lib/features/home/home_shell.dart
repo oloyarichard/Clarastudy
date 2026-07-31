@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../providers/auth_provider.dart';
-import '../../providers/notification_providers.dart';
 import '../courses/course_list_screen.dart';
 import '../profile/profile_screen.dart';
 import 'admin_dashboard_screen.dart';
@@ -12,6 +10,13 @@ import 'teacher_dashboard_screen.dart';
 
 /// The authenticated app's root scaffold: a role-aware dashboard tab,
 /// a shared courses tab, and a profile tab, all behind one bottom nav.
+///
+/// Notifications used to be a floating action button here, but it sat in
+/// the same bottom-right corner as the teacher dashboard's own "New course"
+/// FAB, effectively burying it. Notifications now live as a bell icon in
+/// each dashboard's own AppBar (see NotificationBellAction) instead, so
+/// there's no shared FAB at this level at all — each dashboard is free to
+/// use its own FAB for whatever's relevant to that role.
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({super.key});
 
@@ -36,43 +41,30 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     };
 
     final pages = [dashboard, const CourseListScreen(), const ProfileScreen()];
-    final unreadAsync = ref.watch(unreadNotificationCountProvider);
-    final unread = unreadAsync.asData?.value ?? 0;
 
     return Scaffold(
       body: IndexedStack(index: _index, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: [
-          const NavigationDestination(
+        destinations: const [
+          NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),
             selectedIcon: Icon(Icons.dashboard_rounded),
             label: 'Dashboard',
           ),
-          const NavigationDestination(
+          NavigationDestination(
             icon: Icon(Icons.menu_book_outlined),
             selectedIcon: Icon(Icons.menu_book_rounded),
             label: 'Courses',
           ),
-          const NavigationDestination(
+          NavigationDestination(
             icon: Icon(Icons.person_outline_rounded),
             selectedIcon: Icon(Icons.person_rounded),
             label: 'Profile',
           ),
         ],
       ),
-      floatingActionButton: _index == 0
-          ? Badge(
-              isLabelVisible: unread > 0,
-              label: Text('$unread'),
-              child: FloatingActionButton(
-                heroTag: 'notifications-fab',
-                onPressed: () => context.push('/notifications'),
-                child: const Icon(Icons.notifications_outlined),
-              ),
-            )
-          : null,
     );
   }
 }

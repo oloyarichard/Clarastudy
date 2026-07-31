@@ -16,6 +16,17 @@ class EnrollmentRepository {
     return PaginatedResponse.fromDynamic(response.data, Enrollment.fromJson);
   }
 
+  /// Atomically pays for and enrolls in a course. Throws [ApiException]
+  /// with statusCode 402 and fieldErrors containing momo_wallet_number /
+  /// shortfall if the student's wallet balance is too low.
+  Future<Enrollment> enrollAndPay({required String courseId}) async {
+    final response = await _api.post(ApiConfig.enrollAndPay, data: {
+      'course_id': courseId,
+    });
+    final data = response.data as Map<String, dynamic>;
+    return Enrollment.fromJson(data['enrollment'] as Map<String, dynamic>);
+  }
+
   Future<Enrollment> enroll({
     required String courseId,
     required String studentId,
