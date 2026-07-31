@@ -14,7 +14,7 @@ import '../../providers/live_class_providers.dart';
 
 class CreateLiveClassScreen extends ConsumerStatefulWidget {
   const CreateLiveClassScreen({super.key});
-
+  
   @override
   ConsumerState<CreateLiveClassScreen> createState() => _CreateLiveClassScreenState();
 }
@@ -27,7 +27,7 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
   DateTime _scheduledAt = DateTime.now().add(const Duration(hours: 1));
   String? _selectedCourseId;
   bool _submitting = false;
-
+  
   @override
   void dispose() {
     _titleController.dispose();
@@ -35,7 +35,7 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
     _durationController.dispose();
     super.dispose();
   }
-
+  
   Future<void> _pickDateTime() async {
     final date = await showDatePicker(
       context: context,
@@ -53,7 +53,7 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
       _scheduledAt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
     });
   }
-
+  
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final user = ref.read(authProvider).user;
@@ -64,25 +64,28 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
       );
       return;
     }
-
+    
     setState(() => _submitting = true);
     try {
       final roomId = 'room-${DateTime.now().millisecondsSinceEpoch}';
-      await ref.read(liveClassRepositoryProvider).createLiveClass(
-            teacherId: user.id,
-            courseId: _selectedCourseId!,
-            title: _titleController.text.trim(),
-            description: _descriptionController.text.trim(),
-            scheduledAt: _scheduledAt,
-            durationMinutes: int.tryParse(_durationController.text.trim()) ?? 60,
-            roomId: roomId,
-          );
+      final created = await ref.read(liveClassRepositoryProvider).createLiveClass(
+        teacherId: user.id,
+        courseId: _selectedCourseId!,
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        scheduledAt: _scheduledAt,
+        durationMinutes: int.tryParse(_durationController.text.trim()) ?? 60,
+        roomId: roomId,
+      );
       ref.invalidate(liveClassesListProvider);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Live class scheduled!')),
         );
-        context.pop();
+        // Go straight into the class's own screen — that's where the
+        // teacher finds the "Start class" button, rather than leaving
+        // them to hunt for it back in a list.
+        context.pushReplacement('/live-classes/${created.id}');
       }
     } catch (e) {
       if (mounted) {
@@ -93,11 +96,11 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
       if (mounted) setState(() => _submitting = false);
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
     final formatter = DateFormat('EEE, MMM d, yyyy · h:mm a');
-
+    
     return Scaffold(
       appBar: AppBar(title: const Text('Schedule live class')),
       body: SafeArea(
@@ -129,8 +132,8 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
                             hintText: 'Only students enrolled in this course can join',
                           ),
                           items: courses
-                              .map((Course c) => DropdownMenuItem(value: c.id, child: Text(c.title)))
-                              .toList(),
+                          .map((Course c) => DropdownMenuItem(value: c.id, child: Text(c.title)))
+                          .toList(),
                           onChanged: (value) => setState(() => _selectedCourseId = value),
                           validator: (v) => v == null ? 'Pick a course' : null,
                         );

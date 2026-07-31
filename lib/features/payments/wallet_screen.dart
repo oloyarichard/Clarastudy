@@ -11,19 +11,21 @@ import '../../providers/payment_providers.dart';
 
 class WalletScreen extends ConsumerWidget {
   const WalletScreen({super.key});
-
+  
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final walletAsync = ref.watch(walletProvider);
     final paymentsAsync = ref.watch(myPaymentsProvider);
+    final topUpsAsync = ref.watch(myTopUpsProvider);
     final currency = NumberFormat.currency(symbol: '\$');
-
+    
     return Scaffold(
       appBar: AppBar(title: const Text('Wallet')),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(walletProvider);
           ref.invalidate(myPaymentsProvider);
+          ref.invalidate(myTopUpsProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -73,10 +75,10 @@ class WalletScreen extends ConsumerWidget {
                   );
                 }
                 final sorted = [...payments]..sort((a, b) {
-                    final aDate = a.createdAt ?? DateTime(2000);
-                    final bDate = b.createdAt ?? DateTime(2000);
-                    return bDate.compareTo(aDate);
-                  });
+                  final aDate = a.createdAt ?? DateTime(2000);
+                  final bDate = b.createdAt ?? DateTime(2000);
+                  return bDate.compareTo(aDate);
+                });
                 return Column(
                   children: sorted.map((p) => _PaymentTile(payment: p)).toList(),
                 );
@@ -87,6 +89,76 @@ class WalletScreen extends ConsumerWidget {
                 onRetry: () => ref.invalidate(myPaymentsProvider),
               ),
             ),
+            const SizedBox(height: 28),
+            const SectionHeader(title: 'Top-up requests'),
+            const SizedBox(height: 12),
+            topUpsAsync.when(
+              data: (topUps) {
+                if (topUps.isEmpty) {
+                  return const EmptyView(
+                    message: 'No top-up requests yet.',
+                    icon: Icons.request_quote_outlined,
+                  );
+                }
+                final sorted = [...topUps]..sort((a, b) {
+                  final aDate = a.createdAt ?? DateTime(2000);
+                  final bDate = b.createdAt ?? DateTime(2000);
+                  return bDate.compareTo(aDate);
+                });
+                return Column(
+                  children: sorted.map((t) => _TopUpTile(topUp: t)).toList(),
+                );
+              },
+              loading: () => const LoadingView(),
+              error: (e, __) => ErrorView(
+                message: e.toString(),
+                onRetry: () => ref.invalidate(myTopUpsProvider),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TopUpTile extends StatelessWidget {
+  const _TopUpTile({required this.topUp});
+  
+  final WalletTopUpRequest topUp;
+  
+  Color get _statusColor {
+    switch (topUp.status) {
+      case 'approved':
+        return AppColors.secondary;
+      case 'rejected':
+        return AppColors.error;
+      default:
+        return AppColors.accent;
+    }
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    final formatter = DateFormat('MMM d, yyyy');
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: Icon(Icons.request_quote_rounded, color: _statusColor),
+        title: Text(
+          'Reference: ${topUp.momoReference}',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          topUp.createdAt != null ? formatter.format(topUp.createdAt!) : '',
+        ),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text('\$${topUp.amount.toStringAsFixed(2)}',
+            style: const TextStyle(fontWeight: FontWeight.w800)),
+            StatusChip(label: topUp.status, color: _statusColor),
           ],
         ),
       ),
@@ -96,9 +168,9 @@ class WalletScreen extends ConsumerWidget {
 
 class _PaymentTile extends ConsumerWidget {
   const _PaymentTile({required this.payment});
-
+  
   final Payment payment;
-
+  
   Color get _statusColor {
     switch (payment.status) {
       case 'completed':
@@ -109,12 +181,12 @@ class _PaymentTile extends ConsumerWidget {
         return AppColors.accent;
     }
   }
-
+  
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final formatter = DateFormat('MMM d, yyyy');
     final courseAsync = ref.watch(courseDetailProvider(payment.courseId));
-
+    
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
@@ -127,14 +199,14 @@ class _PaymentTile extends ConsumerWidget {
         ),
         subtitle: Text(
           '${payment.paymentMethod.replaceAll('_', ' ')}'
-          '${payment.createdAt != null ? ' · ${formatter.format(payment.createdAt!)}' : ''}',
+        '${payment.createdAt != null ? ' · ${formatter.format(payment.createdAt!)}' : ''}',
         ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text('\$${payment.amount.toStringAsFixed(2)}',
-                style: const TextStyle(fontWeight: FontWeight.w800)),
+            style: const TextStyle(fontWeight: FontWeight.w800)),
             StatusChip(label: payment.status, color: _statusColor),
           ],
         ),
