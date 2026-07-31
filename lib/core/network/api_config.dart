@@ -15,7 +15,7 @@ class ApiConfig {
   ApiConfig._();
 
   /// Change this single value to point the app at your backend.
-  static const String host = 'http://10.0.2.2:8000';
+  static const String host = 'http://192.168.0.16:8000';
 
   static const String apiBase = '$host/api';
   static const String mediaBase = host;
