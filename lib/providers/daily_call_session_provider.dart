@@ -126,53 +126,44 @@ class DailyCallSession extends ChangeNotifier {
     notifyListeners();
   }
   
-  /// See the note on this same method in the old DailyCallScreen — exact
-  /// method names for device enumeration/switching aren't fully verified
-  /// against daily_flutter's actual API surface.
+  /// TEMPORARILY DISABLED, same reasoning as muteParticipant() below:
+  /// this method combined several unverified daily_flutter API guesses
+  /// (device enumeration shape, facing-mode property/values, a nested
+  /// settings structure) — exactly the kind of guess that just broke a
+  /// build. Cleanly disabled rather than risking that twice. Everything
+  /// else (join, your own mic/camera on-off, leave, minimize, chat) is
+  /// unaffected.
   Future<void> flipCamera() async {
-    final c = client;
-    if (c == null) return;
-    try {
-      final devices = await c.getInputDevices();
-      final cameras = devices.camera;
-      if (cameras.length < 2) return;
-      final nextFacing = usingFrontCamera ? 'environment' : 'user';
-      final target = cameras.firstWhere(
-        (d) => d.facingMode == nextFacing,
-        orElse: () => cameras.first,
-      );
-      await c.updateInputs(
-        inputs: InputSettingsUpdate.set(
-          camera: CameraInputSettingsUpdate.set(
-            isEnabled: const BoolUpdate.set(true),
-            settings: CameraInputSettingsUpdate.set(deviceId: target.deviceId),
-          ),
-        ),
-      );
-      usingFrontCamera = !usingFrontCamera;
-      notifyListeners();
-    } catch (_) {
-      // Surfaced to the user by the caller, which has a BuildContext.
-      rethrow;
-    }
+    throw Exception('Camera switching is temporarily unavailable.');
   }
   
-  /// Owner-only remote mute — same call as before, now callable from
-  /// either the full-screen or minimized context since it lives here.
+  /// Owner-only remote mute.
+  ///
+  /// TEMPORARILY DISABLED: the real CallClient method is
+  /// updateRemoteParticipants(updatesById: Map<ParticipantId,
+  /// RemoteParticipantUpdate>) — confirmed by name via the daily_flutter
+  /// changelog and the equivalent Android SDK reference — but the exact
+  /// field(s) on RemoteParticipantUpdate for muting a mic aren't
+  /// confirmed yet. Rather than guess that shape and risk another failed
+  /// build, this is a clean no-op for now: everything else (join, mute
+  /// your own mic, camera, leave, minimize, chat) is unaffected. Wire
+  /// this back in once RemoteParticipantUpdate's real fields are
+  /// confirmed against the actual package source.
   Future<void> muteParticipant(String participantId) async {
     if (!isOwner) return;
-    await client?.updateParticipants(
-      participants: {
-        participantId: ParticipantUpdate(
-          inputsEnabled: ParticipantInputsUpdate(microphone: BoolUpdate.set(false)),
-        ),
-      },
-    );
+    // Intentionally not calling client.updateRemoteParticipants(...) yet.
   }
   
   Future<void> leave() async {
+    // NOTE: intentionally NOT calling client.dispose() — the official
+    // daily-flutter-demo README states the CallClient is meant to
+    // persist and be reusable after leaving a call ("the CallClient
+    // remains and can be re-used for further calls... it is not
+    // destroyed until the application exits"). dispose() was only ever
+    // confirmed to exist on VideoViewController, never on CallClient
+    // itself — calling a nonexistent method here would have broken
+    // every single "leave call" action in the app.
     await client?.leave();
-    await client?.dispose();
     _reset();
   }
   
@@ -183,3 +174,10 @@ class DailyCallSession extends ChangeNotifier {
     isOwner = false;
     isMinimized = false;
     participants.clear();
+    notifyListeners();
+  }
+}
+
+final dailyCallSessionProvider = ChangeNotifierProvider<DailyCallSession>((ref) {
+  return DailyCallSession();
+});
