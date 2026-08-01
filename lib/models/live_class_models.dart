@@ -13,7 +13,7 @@ class LiveClass {
     this.status = 'scheduled',
     this.createdAt,
   });
-
+  
   final String id;
   final String teacherId;
   final String courseId;
@@ -24,10 +24,10 @@ class LiveClass {
   final String roomId;
   final String status; // scheduled | live | ended
   final DateTime? createdAt;
-
+  
   bool get isLive => status == 'live';
   bool get isEnded => status == 'ended';
-
+  
   factory LiveClass.fromJson(Map<String, dynamic> json) {
     return LiveClass(
       id: parseString(json['id']),
@@ -44,28 +44,26 @@ class LiveClass {
   }
 }
 
-/// Room info for joining a live class's Jitsi call. We're on the public
-/// meet.jit.si server, so there's no JWT — access control (who's even
-/// allowed to fetch this) is enforced entirely by the backend before this
-/// ever gets returned. `isModerator` is a UI hint for the app itself (e.g.
-/// which controls to show); actual Jitsi moderator status on the public
-/// server goes to whoever's client joins the room first.
-class JitsiCredentials {
-  JitsiCredentials({
-    required this.domain,
-    required this.room,
-    required this.isModerator,
+/// Room info for joining a live class's Daily.co call. The token already
+/// carries the correct role (moderator or not) — decided server-side by
+/// LiveClassDailyTokenView before this is ever returned — so there's no
+/// join-order dependency and no lobby/knocking involved.
+class DailyCallCredentials {
+  DailyCallCredentials({
+    required this.roomUrl,
+    required this.token,
+    required this.isOwner,
   });
-
-  final String domain;
-  final String room;
-  final bool isModerator;
-
-  factory JitsiCredentials.fromJson(Map<String, dynamic> json) {
-    return JitsiCredentials(
-      domain: parseString(json['domain']),
-      room: parseString(json['room']),
-      isModerator: json['is_moderator'] == true,
+  
+  final String roomUrl;
+  final String token;
+  final bool isOwner;
+  
+  factory DailyCallCredentials.fromJson(Map<String, dynamic> json) {
+    return DailyCallCredentials(
+      roomUrl: parseString(json['room_url']),
+      token: parseString(json['token']),
+      isOwner: json['is_owner'] == true,
     );
   }
 }
@@ -78,13 +76,13 @@ class LiveChatMessage {
     required this.message,
     this.createdAt,
   });
-
+  
   final String id;
   final String liveClassId;
   final String userId;
   final String message;
   final DateTime? createdAt;
-
+  
   factory LiveChatMessage.fromJson(Map<String, dynamic> json) {
     return LiveChatMessage(
       id: parseString(json['id']),

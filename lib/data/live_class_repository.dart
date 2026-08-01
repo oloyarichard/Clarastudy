@@ -38,8 +38,10 @@ class LiveClassRepository {
     return LiveClass.fromJson(response.data as Map<String, dynamic>);
   }
   
-  /// Teacher-only: marks the class live, which is what unblocks students'
-  /// join calls (see LiveClassJitsiTokenView on the backend).
+  /// Teacher-only: marks the class 'live'. Purely informational (e.g. a
+  /// "live now" badge) — no longer required before students can join;
+  /// that was a Jitsi-specific workaround, gone now that Daily assigns
+  /// roles explicitly via the join token.
   Future<LiveClass> startLiveClass(String liveClassId) async {
     final response = await _api.post(ApiConfig.liveClassStart(liveClassId));
     return LiveClass.fromJson(response.data as Map<String, dynamic>);
@@ -50,9 +52,13 @@ class LiveClassRepository {
     await _api.delete(ApiConfig.liveClassDelete(liveClassId));
   }
   
-  Future<JitsiCredentials> getJitsiCredentials(String liveClassId) async {
-    final response = await _api.get(ApiConfig.liveClassJitsiToken(liveClassId));
-    return JitsiCredentials.fromJson(response.data as Map<String, dynamic>);
+  /// Sends userId + classId to the backend, which decides the role
+  /// (teacher/admin -> is_owner, enrolled student -> attendee, anyone
+  /// else -> rejected before this call even returns) and mints a Daily
+  /// meeting token already carrying that role.
+  Future<DailyCallCredentials> getDailyCredentials(String liveClassId) async {
+    final response = await _api.get(ApiConfig.liveClassDailyToken(liveClassId));
+    return DailyCallCredentials.fromJson(response.data as Map<String, dynamic>);
   }
   
   Future<List<LiveChatMessage>> getLiveChat(String liveClassId) async {

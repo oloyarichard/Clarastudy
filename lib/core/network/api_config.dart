@@ -15,7 +15,7 @@ class ApiConfig {
   ApiConfig._();
   
   /// Change this single value to point the app at your backend.
-  static const String host = 'http://192.168.0.16:8000';
+  static const String host = 'http://10.0.2.2:8000';
   
   static const String apiBase = '$host/api';
   static const String mediaBase = host;
@@ -49,8 +49,8 @@ class ApiConfig {
   static const String liveClassCreate = '/live-classes/create/';
   static String liveClassChat(String liveClassId) =>
   '/live-classes/$liveClassId/chat/';
-  static String liveClassJitsiToken(String liveClassId) =>
-  '/live-classes/$liveClassId/jitsi-token/';
+  static String liveClassDailyToken(String liveClassId) =>
+  '/live-classes/$liveClassId/daily-token/';
   static String liveClassStart(String liveClassId) =>
   '/live-classes/$liveClassId/start/';
   static String liveClassDelete(String liveClassId) =>
