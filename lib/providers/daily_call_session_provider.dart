@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:daily_flutter/daily_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +30,7 @@ class DailyCallSession extends ChangeNotifier {
   /// same as "Mute all" doesn't prevent someone from unmuting themselves.
   bool allMuted = false;
   final Map<String, String> participants = {};
+  StreamSubscription<Event>? _eventSubscription;
 
   bool get hasActiveCall => client != null;
 
@@ -57,7 +60,7 @@ class DailyCallSession extends ChangeNotifier {
     final newClient = await CallClient.create();
     client = newClient;
 
-    newClient.events.listen((event) => _handleEvent(event, currentUserId));
+    _eventSubscription = newClient.events.listen((event) => _handleEvent(event, currentUserId));
 
     try {
       await newClient.join(
@@ -110,6 +113,23 @@ class DailyCallSession extends ChangeNotifier {
         if (stateData.state == CallState.left) {
           _reset();
         }
+      },
+      // Fires for ANY change to this client's own inputs — including
+      // when the teacher remotely mutes this participant. Without this,
+      // a muted student's own mic button would keep showing "unmuted"
+      // even though they'd actually been silenced, since the remote
+      // mute never otherwise touches this client's local micEnabled/
+      // cameraEnabled state. NOTE: inputs.microphone.isEnabled and
+      // inputs.camera.isEnabled are a pattern-based inference (matching
+      // every other Settings/SettingsUpdate pair in this SDK, which has
+      // been reliable everywhere else so far) — InputSettings' own
+      // field types (CameraInputSettings, MicrophoneInputSettings) are
+      // confirmed real, but I did not fetch MicrophoneInputSettings'
+      // own field list directly to confirm .isEnabled by name.
+      inputsUpdated: (inputs) {
+        micEnabled = inputs.microphone.isEnabled;
+        cameraEnabled = inputs.camera.isEnabled;
+        notifyListeners();
       },
       orElse: () {},
     );
@@ -225,15 +245,20 @@ class DailyCallSession extends ChangeNotifier {
   }
 
   Future<void> leave() async {
-    // NOTE: intentionally NOT calling client.dispose() — the official
-    // daily-flutter-demo README states the CallClient is meant to
-    // persist and be reusable after leaving a call ("the CallClient
-    // remains and can be re-used for further calls... it is not
-    // destroyed until the application exits"). dispose() was only ever
-    // confirmed to exist on VideoViewController, never on CallClient
-    // itself — calling a nonexistent method here would have broken
-    // every single "leave call" action in the app.
+    // dispose() IS confirmed to exist on CallClient (its own class docs:
+    // "Tear down and clean up all resources associated with this
+    // CallClient"). The earlier decision to skip it was based on the
+    // official demo's guidance that a CallClient CAN be reused across
+    // calls — but that guidance applies to reusing the SAME client
+    // object. This architecture creates a brand new CallClient on every
+    // start() instead, so the old one must be disposed here, or its
+    // native resources (camera/mic capture, the WebRTC connection
+    // itself) can keep running even after the Dart-side state says
+    // you've left — which is exactly why "hang up" wasn't fully hanging
+    // up.
+    await _eventSubscription?.cancel();
     await client?.leave();
+    await client?.dispose();
     _reset();
   }
 

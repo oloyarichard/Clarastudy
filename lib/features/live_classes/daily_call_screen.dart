@@ -61,6 +61,139 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
     }
   }
 
+  // Remote participants' video — confirmed via pub.dev (Participants.remote,
+  // Participant.media?.camera.track, ParticipantInfo.isOwner). One
+  // VideoViewController per remote participant, created/disposed as
+  // people join and leave.
+  final Map<String, VideoViewController> _remoteControllers = {};
+  final Map<String, MediaStreamTrack?> _remoteLastTracks = {};
+
+  /// Which remote participant, if any, was tapped in the thumbnail strip
+  /// to become the main view. Null means "use the default" — the
+  /// moderator for a student, or nobody (show local) for the teacher.
+  String? _pinnedRemoteId;
+
+  void _syncRemoteControllers(DailyCallSession session) {
+    final remote = session.client?.participants.remote ?? {};
+    final currentIds = remote.keys.map((id) => id.id).toSet();
+
+    // Drop controllers for anyone who's left.
+    final staleIds = _remoteControllers.keys.where((id) => !currentIds.contains(id)).toList();
+    for (final id in staleIds) {
+      _remoteControllers.remove(id)?.dispose();
+      _remoteLastTracks.remove(id);
+    }
+
+    // Add/update controllers for everyone currently present.
+    for (final entry in remote.entries) {
+      final id = entry.key.id;
+      final track = entry.value.media?.camera.track;
+      final controller = _remoteControllers.putIfAbsent(id, () => VideoViewController());
+      if (_remoteLastTracks[id] != track) {
+        _remoteLastTracks[id] = track;
+        controller.setTrack(track);
+      }
+    }
+  }
+
+  /// Returns (participantId, Participant) for whoever should be shown
+  /// full-size right now, or null to mean "show the local participant"
+  /// (the teacher's own default view, unchanged from before).
+  MapEntry<String, Participant>? _mainRemoteParticipant(DailyCallSession session) {
+    final remote = session.client?.participants.remote ?? {};
+    if (remote.isEmpty) return null;
+
+    if (_pinnedRemoteId != null) {
+      final pinned = remote.entries.where((e) => e.key.id == _pinnedRemoteId);
+      if (pinned.isNotEmpty) {
+        return MapEntry(pinned.first.key.id, pinned.first.value);
+      }
+      _pinnedRemoteId = null; // they left — fall through to the default
+    }
+
+    // Default for a student: the moderator, if present.
+    if (!session.isOwner) {
+      final moderator = remote.entries.where((e) => e.value.info.isOwner);
+      if (moderator.isNotEmpty) {
+        return MapEntry(moderator.first.key.id, moderator.first.value);
+      }
+    }
+
+    return null; // teacher's own screen keeps showing themselves by default
+  }
+
+  Widget _localVideoTile(DailyCallSession session) {
+    final showVideo = session.cameraEnabled && _lastTrack != null;
+    return showVideo
+        ? VideoView(controller: _videoController)
+        : CameraOffPlaceholder(
+            displayName: ref.watch(authProvider).user?.displayName ?? 'You',
+          );
+  }
+
+  Widget _remoteVideoTile(String id, Participant participant) {
+    final controller = _remoteControllers[id];
+    final showVideo = !participant.isCameraMuted && controller != null;
+    return showVideo
+        ? VideoView(controller: controller)
+        : CameraOffPlaceholder(
+            displayName: participant.info.username?.isNotEmpty ?? false
+                ? participant.info.username!
+                : 'Participant',
+          );
+  }
+
+  /// Horizontal scrollable strip of everyone NOT currently shown as the
+  /// main view — tap any tile to swap it into main. Always includes the
+  /// local participant as a tile (so you can tap back to "myself") when
+  /// a remote participant is currently pinned as main.
+  Widget _thumbnailStrip(DailyCallSession session, String? mainRemoteId) {
+    final remote = session.client?.participants.remote ?? {};
+    final others = remote.entries.where((e) => e.key.id != mainRemoteId).toList();
+    final showLocalTile = mainRemoteId != null; // local is main by default, so only show it in the strip when it's NOT main
+
+    if (others.isEmpty && !showLocalTile) return const SizedBox.shrink();
+
+    return SizedBox(
+      height: 90,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          if (showLocalTile)
+            _thumbnailTile(
+              child: _localVideoTile(session),
+              onTap: () => setState(() => _pinnedRemoteId = null),
+            ),
+          ...others.map(
+            (entry) => _thumbnailTile(
+              child: _remoteVideoTile(entry.key.id, entry.value),
+              onTap: () => setState(() => _pinnedRemoteId = entry.key.id),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _thumbnailTile({required Widget child, required VoidCallback onTap}) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 10),
+      child: GestureDetector(
+        onTap: onTap,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            width: 68,
+            height: 90,
+            color: Colors.black,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -72,6 +205,9 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
   void dispose() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _videoController.dispose();
+    for (final controller in _remoteControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -277,16 +413,22 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
                   )
                 : Builder(builder: (context) {
                     _syncVideoTrack(session);
-                    final showVideo = session.cameraEnabled && _lastTrack != null;
+                    _syncRemoteControllers(session);
+                    final mainRemote = _mainRemoteParticipant(session);
                     return Stack(
                       children: [
                         if (session.client != null)
                           Positioned.fill(
-                            child: showVideo
-                                ? VideoView(controller: _videoController)
-                                : CameraOffPlaceholder(
-                                    displayName: ref.watch(authProvider).user?.displayName ?? 'You',
-                                  ),
+                            child: mainRemote != null
+                                ? _remoteVideoTile(mainRemote.key, mainRemote.value)
+                                : _localVideoTile(session),
+                          ),
+                        if (session.client != null)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 96,
+                            child: _thumbnailStrip(session, mainRemote?.key),
                           ),
                         Positioned(
                           top: 12,
@@ -414,7 +556,12 @@ class _LiveClassChatSheetState extends ConsumerState<_LiveClassChatSheet> {
     // Chat is REST-backed, not a live socket — poll while this sheet is
     // open so messages from other participants actually show up without
     // requiring you to send something yourself to trigger a refresh.
-    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    // 1 second is close to the practical floor for REST polling without
+    // hammering the server — true instant delivery would need a
+    // WebSocket (Django Channels is already in this project's stack for
+    // that, just not wired up for chat yet). This is the fast-as-
+    // reasonable version of the polling approach, not literal real-time.
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) ref.invalidate(liveChatProvider(widget.liveClassId));
     });
   }
