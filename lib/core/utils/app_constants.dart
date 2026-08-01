@@ -2,7 +2,7 @@
 class AppConstants {
   AppConstants._();
 
-  static const String appName = 'Edutech Hom';
+  static const String appName = 'Clarastudy';
   static const String appVersion = '1.0.0';
 
   // Secure storage keys

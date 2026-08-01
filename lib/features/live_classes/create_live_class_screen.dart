@@ -129,10 +129,15 @@ class _CreateLiveClassScreenState extends ConsumerState<CreateLiveClassScreen> {
                         return DropdownButtonFormField<String>(
                           initialValue: _selectedCourseId,
                           decoration: const InputDecoration(
-                            hintText: 'Only students enrolled in this course can join',
+                            hintText: 'Select a course',
+                            helperText: 'Only students enrolled in this course can join',
+                            helperMaxLines: 2,
                           ),
                           items: courses
-                              .map((Course c) => DropdownMenuItem(value: c.id, child: Text(c.title)))
+                              .map((Course c) => DropdownMenuItem(
+                                    value: c.id,
+                                    child: Text(c.title, overflow: TextOverflow.ellipsis),
+                                  ))
                               .toList(),
                           onChanged: (value) => setState(() => _selectedCourseId = value),
                           validator: (v) => v == null ? 'Pick a course' : null,
