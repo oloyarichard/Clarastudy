@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../providers/daily_call_session_provider.dart';
+import 'camera_off_placeholder.dart';
 import 'daily_call_screen.dart';
 
 /// A small draggable floating bubble shown over the rest of the app
@@ -21,6 +22,26 @@ class MiniCallBubble extends ConsumerStatefulWidget {
 class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
   Offset _offset = const Offset(16, 100);
   
+  // Confirmed API (pub.dev VideoViewController class docs, daily_flutter
+  // 0.38.0): create once, call setTrack() whenever the track changes,
+  // hand the controller itself to VideoView.
+  final _videoController = VideoViewController();
+  MediaStreamTrack? _lastTrack;
+  
+  @override
+  void dispose() {
+    _videoController.dispose();
+    super.dispose();
+  }
+  
+  void _syncVideoTrack(DailyCallSession session) {
+    final track = session.client?.participants.local.media?.camera.track;
+    if (track != _lastTrack) {
+      _lastTrack = track;
+      _videoController.setTrack(track);
+    }
+  }
+  
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(dailyCallSessionProvider);
@@ -28,6 +49,8 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
       return const SizedBox.shrink();
     }
     
+    _syncVideoTrack(session);
+    final showVideo = session.cameraEnabled && _lastTrack != null;
     final screenSize = MediaQuery.of(context).size;
     
     return Positioned(
@@ -67,5 +90,35 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
               fit: StackFit.expand,
               children: [
                 if (session.client != null)
-                  VideoView(
-                    videoTrack: session.client!.participants
+                  showVideo
+                  ? VideoView(controller: _videoController)
+                  : CameraOffPlaceholder(
+                    displayName: session.liveClassTitle ?? 'Call',
+                    compact: true,
+                  ),
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: GestureDetector(
+                      onTap: () => session.leave(),
+                      child: const CircleAvatar(
+                        radius: 12,
+                        backgroundColor: AppColors.error,
+                        child: Icon(Icons.call_end_rounded, size: 14, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                  if (!session.micEnabled)
+                    const Positioned(
+                      bottom: 4,
+                      left: 4,
+                      child: Icon(Icons.mic_off_rounded, color: Colors.white, size: 16),
+                    ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

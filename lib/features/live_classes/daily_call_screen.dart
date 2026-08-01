@@ -9,6 +9,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/core_providers.dart';
 import '../../providers/daily_call_session_provider.dart';
 import '../../providers/live_class_providers.dart';
+import 'camera_off_placeholder.dart';
 
 /// Full-screen, in-app Daily.co call for a live class.
 ///
@@ -41,6 +42,23 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
   bool _immersive = true;
   String? _errorMessage;
   
+  // Confirmed API (pub.dev VideoViewController class docs, daily_flutter
+  // 0.38.0): create once, call setTrack() whenever the track changes,
+  // hand the controller itself to VideoView.
+  final _videoController = VideoViewController();
+  MediaStreamTrack? _lastTrack;
+  
+  /// Pushes the local participant's current camera track into the
+  /// controller whenever it changes. Cheap to call on every build —
+  /// it no-ops via the _lastTrack check when nothing's actually changed.
+  void _syncVideoTrack(DailyCallSession session) {
+    final track = session.client?.participants.local.media?.camera.track;
+    if (track != _lastTrack) {
+      _lastTrack = track;
+      _videoController.setTrack(track);
+    }
+  }
+  
   @override
   void initState() {
     super.initState();
@@ -51,6 +69,7 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
   @override
   void dispose() {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    _videoController.dispose();
     super.dispose();
   }
   
@@ -182,91 +201,96 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
             ),
           ),
         )
-        : Stack(
-          children: [
-            if (session.client != null)
-              Center(
-                child: VideoView(
-                  videoTrack: session.client!.participants.local.media?.camera.track,
-                  mirror: true,
+        : Builder(builder: (context) {
+          _syncVideoTrack(session);
+          final showVideo = session.cameraEnabled && _lastTrack != null;
+          return Stack(
+            children: [
+              if (session.client != null)
+                Positioned.fill(
+                  child: showVideo
+                  ? VideoView(controller: _videoController)
+                  : CameraOffPlaceholder(
+                    displayName: ref.watch(authProvider).user?.displayName ?? 'You',
+                  ),
                 ),
-              ),
-              Positioned(
-                top: 12,
-                left: 16,
-                right: 16,
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white),
-                      tooltip: 'Minimize',
-                      onPressed: _minimize,
-                    ),
-                    Expanded(
-                      child: Text(
-                        widget.liveClassTitle,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        _immersive ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                        color: Colors.white,
-                      ),
-                      tooltip: _immersive ? 'Exit fullscreen' : 'Fullscreen',
-                      onPressed: _toggleFullscreen,
-                    ),
-                    if (session.isOwner)
+                Positioned(
+                  top: 12,
+                  left: 16,
+                  right: 16,
+                  child: Row(
+                    children: [
                       IconButton(
-                        icon: const Icon(Icons.people_alt_rounded, color: Colors.white),
-                        onPressed: () => _openParticipants(session),
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white),
+                        tooltip: 'Minimize',
+                        onPressed: _minimize,
                       ),
-                  ],
+                      Expanded(
+                        child: Text(
+                          widget.liveClassTitle,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          _immersive ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                          color: Colors.white,
+                        ),
+                        tooltip: _immersive ? 'Exit fullscreen' : 'Fullscreen',
+                        onPressed: _toggleFullscreen,
+                      ),
+                      if (session.isOwner)
+                        IconButton(
+                          icon: const Icon(Icons.people_alt_rounded, color: Colors.white),
+                          onPressed: () => _openParticipants(session),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              Positioned(
-                right: 16,
-                bottom: 100,
-                child: FloatingActionButton(
-                  heroTag: 'live-class-chat-fab',
-                  backgroundColor: AppColors.primary,
-                  onPressed: _openAppChat,
-                  child: const Icon(Icons.chat_bubble_rounded, color: Colors.white),
+                Positioned(
+                  right: 16,
+                  bottom: 100,
+                  child: FloatingActionButton(
+                    heroTag: 'live-class-chat-fab',
+                    backgroundColor: AppColors.primary,
+                    onPressed: _openAppChat,
+                    child: const Icon(Icons.chat_bubble_rounded, color: Colors.white),
+                  ),
                 ),
-              ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 24,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _CallControlButton(
-                      icon: session.micEnabled ? Icons.mic_rounded : Icons.mic_off_rounded,
-                      onPressed: () => session.toggleMic(),
-                    ),
-                    const SizedBox(width: 16),
-                    _CallControlButton(
-                      icon: session.cameraEnabled ? Icons.videocam_rounded : Icons.videocam_off_rounded,
-                      onPressed: () => session.toggleCamera(),
-                    ),
-                    const SizedBox(width: 16),
-                    _CallControlButton(
-                      icon: Icons.cameraswitch_rounded,
-                      onPressed: _flipCamera,
-                    ),
-                    const SizedBox(width: 16),
-                    _CallControlButton(
-                      icon: Icons.call_end_rounded,
-                      color: AppColors.error,
-                      onPressed: _leave,
-                    ),
-                  ],
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 24,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _CallControlButton(
+                        icon: session.micEnabled ? Icons.mic_rounded : Icons.mic_off_rounded,
+                        onPressed: () => session.toggleMic(),
+                      ),
+                      const SizedBox(width: 16),
+                      _CallControlButton(
+                        icon: session.cameraEnabled ? Icons.videocam_rounded : Icons.videocam_off_rounded,
+                        onPressed: () => session.toggleCamera(),
+                      ),
+                      const SizedBox(width: 16),
+                      _CallControlButton(
+                        icon: Icons.cameraswitch_rounded,
+                        onPressed: _flipCamera,
+                      ),
+                      const SizedBox(width: 16),
+                      _CallControlButton(
+                        icon: Icons.call_end_rounded,
+                        color: AppColors.error,
+                        onPressed: _leave,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-          ],
-        ),
+            ],
+          );
+        }),
       ),
     );
   }
