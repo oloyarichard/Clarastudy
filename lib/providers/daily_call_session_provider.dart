@@ -145,59 +145,53 @@ class DailyCallSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Confirmed via pub.dev class docs (CameraInputSettingsUpdate,
-  /// VideoMediaTrackSettingsUpdate, MediaTrackFacingModeUpdate) — facing
-  /// mode is a plain enum (.user / .environment), no device list needed.
-  /// The one remaining unverified detail is the exact construction of the
-  /// generic Update<T>.set(...) wrapper for the nested settings field —
-  /// everything else here is confirmed against real class signatures.
+  /// Confirmed via CallClient's own method list on pub.dev:
+  /// setCameraFacingMode({required MediaTrackFacingMode facingMode}). A
+  /// dedicated method — no nested settings/Update wrapper needed at all,
+  /// unlike the earlier (wrong) approach via updateInputs.
   Future<void> flipCamera() async {
     final c = client;
     if (c == null) return;
-    final nextFacing = usingFrontCamera
-        ? MediaTrackFacingModeUpdate.environment
-        : MediaTrackFacingModeUpdate.user;
-    await c.updateInputs(
-      inputs: InputSettingsUpdate.set(
-        camera: CameraInputSettingsUpdate.set(
-          settings: Update<VideoMediaTrackSettingsUpdate>.set(
-            VideoMediaTrackSettingsUpdate.set(facingMode: nextFacing),
-          ),
-        ),
-      ),
-    );
+    final nextFacing =
+        usingFrontCamera ? MediaTrackFacingMode.environment : MediaTrackFacingMode.user;
+    await c.setCameraFacingMode(facingMode: nextFacing);
     usingFrontCamera = !usingFrontCamera;
     notifyListeners();
   }
 
-  /// Owner-only remote mute — confirmed via pub.dev class docs
-  /// (RemoteParticipantUpdate, RemoteInputsEnabledUpdate). The one
-  /// unverified detail is ParticipantId's exact constructor — everything
-  /// else here (method name, argument shape, field names) is confirmed.
-  Future<void> muteParticipant(String participantId) async {
-    if (!isOwner) return;
-    await client?.updateRemoteParticipants(
-      updatesById: {
-        ParticipantId(participantId): RemoteParticipantUpdate.set(
-          inputsEnabled: RemoteInputsEnabledUpdate.set(microphone: false),
-        ),
-      },
+  /// Owner-only: applies a set of RemoteParticipantUpdates in one call.
+  /// Confirmed via CallClient.updateRemoteParticipants's real signature:
+  /// the parameter is named `updates`, not `updatesById`, and it takes
+  /// a RemoteParticipantSettingsUpdatesById wrapper, not a raw Map
+  /// directly — both confirmed from the actual class docs.
+  Future<void> _updateRemoteParticipants(Map<String, RemoteParticipantUpdate> byId) async {
+    if (!isOwner || client == null || byId.isEmpty) return;
+    await client!.updateRemoteParticipants(
+      updates: RemoteParticipantSettingsUpdatesById.set(
+        updates: {for (final entry in byId.entries) ParticipantId(entry.key): entry.value},
+      ),
     );
+  }
+
+  /// Owner-only remote mute for a single participant.
+  Future<void> muteParticipant(String participantId) async {
+    await _updateRemoteParticipants({
+      participantId: RemoteParticipantUpdate.set(
+        inputsEnabled: RemoteInputsEnabledUpdate.set(microphone: false),
+      ),
+    });
   }
 
   /// Owner-only: sets every current participant's microphone to the
   /// given state in one call. Shared by muteAllParticipants() and
   /// unmuteAllParticipants() below.
   Future<void> _setAllMicrophones(bool enabled) async {
-    if (!isOwner || client == null) return;
-    final updates = <ParticipantId, RemoteParticipantUpdate>{
+    await _updateRemoteParticipants({
       for (final id in participants.keys)
-        ParticipantId(id): RemoteParticipantUpdate.set(
+        id: RemoteParticipantUpdate.set(
           inputsEnabled: RemoteInputsEnabledUpdate.set(microphone: enabled),
         ),
-    };
-    if (updates.isEmpty) return;
-    await client!.updateRemoteParticipants(updatesById: updates);
+    });
   }
 
   /// Owner-only: mutes every current participant's microphone — a
