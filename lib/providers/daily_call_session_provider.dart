@@ -65,30 +65,32 @@ class DailyCallSession extends ChangeNotifier {
   }
   
   void _handleEvent(Event event, String? currentUserId) {
-    event.when(
+    event.maybeWhen(
       participantJoined: (participant) {
-        final id = participant.info.userId;
-        final name = participant.info.userName.isNotEmpty ? participant.info.userName : 'Someone';
-    participants[id] = name;
-    notifyListeners();
-    
-    final isSelf = currentUserId != null && id == currentUserId;
-    if (isOwner && !isSelf) {
-      appScaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text('$name joined the class')),
-      );
-    }
+        final id = participant.info.userId ?? '';
+        final name = (participant.info.username?.isNotEmpty ?? false)
+            ? participant.info.username!
+            : 'Someone';
+        participants[id] = name;
+        notifyListeners();
+
+        final isSelf = currentUserId != null && id == currentUserId;
+        if (isOwner && !isSelf) {
+          appScaffoldMessengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('$name joined the class')),
+          );
+        }
       },
-      participantLeft: (participant, reason) {
-        participants.remove(participant.info.userId);
+      participantLeft: (participant) {
+        participants.remove(participant.info.userId ?? '');
         notifyListeners();
       },
       participantUpdated: (participant) {
-        participants[participant.info.userId] = participant.info.userName;
+        participants[participant.info.userId ?? ''] = participant.info.username ?? '';
         notifyListeners();
       },
-      callStateUpdated: (state) {
-        if (state == CallState.left) {
+      callStateUpdated: (stateData) {
+        if (stateData.state == CallState.left) {
           _reset();
         }
       },

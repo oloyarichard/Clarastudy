@@ -201,3 +201,65 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
                           child: Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            constraints: BoxConstraints(
+                              maxWidth: MediaQuery.of(context).size.width * 0.72,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isMine
+                                  ? AppColors.primary
+                                  : AppColors.cardLight,
+                              borderRadius: BorderRadius.circular(14),
+                              border: isMine ? null : Border.all(color: AppColors.border),
+                            ),
+                            child: Text(
+                              msg.message,
+                              style: TextStyle(
+                                color: isMine ? Colors.white : AppColors.textPrimary,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                  loading: () => const LoadingView(),
+                  error: (e, __) => ErrorView(
+                    message: e.toString(),
+                    onRetry: () => ref.invalidate(liveChatProvider(widget.liveClassId)),
+                  ),
+                ),
+              ),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _messageController,
+                          decoration: const InputDecoration(hintText: 'Message the class...'),
+                          onSubmitted: (_) => _send(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        onPressed: _sending ? null : _send,
+                        icon: const Icon(Icons.send_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+        loading: () => const LoadingView(),
+        error: (e, __) => ErrorView(
+          message: e.toString(),
+          onRetry: () => ref.invalidate(liveClassesListProvider),
+        ),
+      ),
+    );
+  }
+}
