@@ -53,7 +53,7 @@ class DailyCallSession extends ChangeNotifier {
     
     await newClient.join(
       url: Uri.parse(credentials.roomUrl),
-      meetingToken: credentials.token,
+      token: credentials.token,
     );
     await newClient.updateInputs(
       inputs: const InputSettingsUpdate.set(
@@ -64,7 +64,7 @@ class DailyCallSession extends ChangeNotifier {
     notifyListeners();
   }
   
-  void _handleEvent(CallEvent event, String? currentUserId) {
+  void _handleEvent(Event event, String? currentUserId) {
     event.when(
       participantJoined: (participant) {
         final id = participant.info.userId;
