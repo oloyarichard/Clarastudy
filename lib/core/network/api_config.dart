@@ -15,7 +15,7 @@ class ApiConfig {
   ApiConfig._();
 
   /// Change this single value to point the app at your backend.
-  static const String host = 'https://clarastudy.com';
+  static const String host = 'https://77.42.41.162/';
 
   static const String apiBase = '$host/api';
   static const String mediaBase = host;
