@@ -75,4 +75,46 @@ class PaymentRepository {
   Future<void> reviewTopUp(String topUpId, {required bool approve}) async {
     await _api.post(ApiConfig.reviewTopUp(topUpId), data: {'approve': approve});
   }
+
+  /// Teacher-only: requests a payout to a mobile money number. The
+  /// amount is held (deducted from the wallet) immediately by the
+  /// backend, before an admin ever reviews it.
+  Future<WithdrawalRequest> requestWithdrawal({
+    required double amount,
+    required String momoNumber,
+  }) async {
+    final response = await _api.post(ApiConfig.withdrawalRequest, data: {
+      'amount': amount,
+      'momo_number': momoNumber,
+    });
+    return WithdrawalRequest.fromJson(response.data as Map<String, dynamic>);
+  }
+
+  /// The requesting teacher's own withdrawal requests, any status.
+  Future<List<WithdrawalRequest>> myWithdrawals() async {
+    final response = await _api.get(ApiConfig.withdrawalRequest);
+    final data = response.data;
+    final results = data is Map<String, dynamic> ? (data['results'] ?? data) : data;
+    return (results as List)
+        .map((e) => WithdrawalRequest.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Admin-only: withdrawal requests still awaiting review.
+  Future<List<WithdrawalRequest>> listPendingWithdrawals() async {
+    final response = await _api.get(ApiConfig.pendingWithdrawals);
+    final data = response.data;
+    final results = data is Map<String, dynamic> ? (data['results'] ?? data) : data;
+    return (results as List)
+        .map((e) => WithdrawalRequest.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Admin-only: approve marks the payout as sent (money is sent
+  /// off-platform to the teacher's mobile money number); reject refunds
+  /// the held amount back to the teacher's wallet. Either way the
+  /// teacher gets a notification (handled server-side).
+  Future<void> reviewWithdrawal(String withdrawalId, {required bool approve}) async {
+    await _api.post(ApiConfig.reviewWithdrawal(withdrawalId), data: {'approve': approve});
+  }
 }

@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/network/api_exception.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_widgets.dart';
 import '../../core/widgets/state_views.dart';
 import '../../models/payment_models.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/core_providers.dart';
 import '../../providers/course_providers.dart';
 import '../../providers/payment_providers.dart';
 
@@ -17,6 +20,8 @@ class WalletScreen extends ConsumerWidget {
     final walletAsync = ref.watch(walletProvider);
     final paymentsAsync = ref.watch(myPaymentsProvider);
     final topUpsAsync = ref.watch(myTopUpsProvider);
+    final withdrawalsAsync = ref.watch(myWithdrawalsProvider);
+    final isTeacher = ref.watch(authProvider).user?.role == 'teacher';
     final currency = NumberFormat.currency(symbol: '\$');
 
     return Scaffold(
@@ -26,6 +31,7 @@ class WalletScreen extends ConsumerWidget {
           ref.invalidate(walletProvider);
           ref.invalidate(myPaymentsProvider);
           ref.invalidate(myTopUpsProvider);
+          ref.invalidate(myWithdrawalsProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -63,6 +69,20 @@ class WalletScreen extends ConsumerWidget {
                 ],
               ),
             ),
+            if (isTeacher) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => showDialog(
+                    context: context,
+                    builder: (_) => const _RequestWithdrawalDialog(),
+                  ),
+                  icon: const Icon(Icons.account_balance_wallet_outlined),
+                  label: const Text('Request withdrawal'),
+                ),
+              ),
+            ],
             const SizedBox(height: 28),
             const SectionHeader(title: 'Payment history'),
             const SizedBox(height: 12),
@@ -115,6 +135,34 @@ class WalletScreen extends ConsumerWidget {
                 onRetry: () => ref.invalidate(myTopUpsProvider),
               ),
             ),
+            if (isTeacher) ...[
+              const SizedBox(height: 28),
+              const SectionHeader(title: 'Withdrawal requests'),
+              const SizedBox(height: 12),
+              withdrawalsAsync.when(
+                data: (withdrawals) {
+                  if (withdrawals.isEmpty) {
+                    return const EmptyView(
+                      message: 'No withdrawal requests yet.',
+                      icon: Icons.account_balance_wallet_outlined,
+                    );
+                  }
+                  final sorted = [...withdrawals]..sort((a, b) {
+                      final aDate = a.createdAt ?? DateTime(2000);
+                      final bDate = b.createdAt ?? DateTime(2000);
+                      return bDate.compareTo(aDate);
+                    });
+                  return Column(
+                    children: sorted.map((w) => _WithdrawalTile(withdrawal: w)).toList(),
+                  );
+                },
+                loading: () => const LoadingView(),
+                error: (e, __) => ErrorView(
+                  message: e.toString(),
+                  onRetry: () => ref.invalidate(myWithdrawalsProvider),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -211,6 +259,152 @@ class _PaymentTile extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _WithdrawalTile extends StatelessWidget {
+  const _WithdrawalTile({required this.withdrawal});
+
+  final WithdrawalRequest withdrawal;
+
+  Color get _statusColor {
+    switch (withdrawal.status) {
+      case 'approved':
+        return AppColors.secondary;
+      case 'rejected':
+        return AppColors.error;
+      default:
+        return AppColors.accent;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final formatter = DateFormat('MMM d, yyyy');
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: Icon(Icons.account_balance_wallet_rounded, color: _statusColor),
+        title: Text(
+          'To: ${withdrawal.momoNumber}',
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          withdrawal.createdAt != null ? formatter.format(withdrawal.createdAt!) : '',
+        ),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text('\$${withdrawal.amount.toStringAsFixed(2)}',
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+            StatusChip(label: withdrawal.status, color: _statusColor),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The dialog a teacher fills in to request a payout — amount and the
+/// mobile money number to receive it. The backend holds (deducts) the
+/// amount from their wallet the moment this is submitted, before any
+/// admin review — see WithdrawalRequestCreateView for why.
+class _RequestWithdrawalDialog extends ConsumerStatefulWidget {
+  const _RequestWithdrawalDialog();
+
+  @override
+  ConsumerState<_RequestWithdrawalDialog> createState() => _RequestWithdrawalDialogState();
+}
+
+class _RequestWithdrawalDialogState extends ConsumerState<_RequestWithdrawalDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _amountController = TextEditingController();
+  final _numberController = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _numberController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _submitting = true);
+    try {
+      await ref.read(paymentRepositoryProvider).requestWithdrawal(
+            amount: double.parse(_amountController.text.trim()),
+            momoNumber: _numberController.text.trim(),
+          );
+      ref.invalidate(walletProvider);
+      ref.invalidate(myWithdrawalsProvider);
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Withdrawal requested — awaiting admin approval.')),
+        );
+      }
+    } catch (e) {
+      String message = 'Could not submit the request.';
+      if (e is ApiException) {
+        final backendError = e.fieldErrors?['error'];
+        message = backendError is String ? backendError : e.message;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Request withdrawal'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppTextField(
+              controller: _amountController,
+              label: 'Amount',
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              prefixIcon: Icons.attach_money_rounded,
+              validator: (v) {
+                final value = double.tryParse((v ?? '').trim());
+                if (value == null || value <= 0) return 'Enter a valid amount';
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            AppTextField(
+              controller: _numberController,
+              label: 'Mobile money number',
+              keyboardType: TextInputType.phone,
+              prefixIcon: Icons.phone_outlined,
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Enter the number to receive payment';
+                return null;
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : _submit,
+          child: Text(_submitting ? 'Submitting…' : 'Submit'),
+        ),
+      ],
     );
   }
 }

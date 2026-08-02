@@ -9,7 +9,7 @@ import '../../providers/auth_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
-  
+
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
 }
@@ -19,19 +19,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscure = true;
-  
+
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
-  
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final success = await ref
-    .read(authProvider.notifier)
-    .login(_emailController.text.trim(), _passwordController.text);
+        .read(authProvider.notifier)
+        .login(_emailController.text.trim(), _passwordController.text);
     if (!success && mounted) {
       final error = ref.read(authProvider).errorMessage;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -39,12 +39,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       );
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
     final isLoading = authState.status == AuthStatus.authenticating;
-    
+
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -75,18 +75,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                  'Welcome back',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
+                SizedBox(
+                  width: double.infinity,
+                  child: Center(
+                    child: Column(
+                      children: [
+                        const Text(
+                          'Welcome back',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Log in to continue learning on ${AppConstants.appName}.',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Log in to continue learning on ${AppConstants.appName}.',
-                  style: TextStyle(color: AppColors.textSecondary),
                 ),
                 const SizedBox(height: 32),
                 AppTextField(
@@ -96,8 +107,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   prefixIcon: Icons.email_outlined,
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'Email is required';
-                if (!v.contains('@')) return 'Enter a valid email';
-                return null;
+                    if (!v.contains('@')) return 'Enter a valid email';
+                    return null;
                   },
                 ),
                 const SizedBox(height: 16),
@@ -108,13 +119,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   prefixIcon: Icons.lock_outline_rounded,
                   suffixIcon: IconButton(
                     icon: Icon(_obscure
-                    ? Icons.visibility_outlined
-                    : Icons.visibility_off_outlined),
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined),
                     onPressed: () => setState(() => _obscure = !_obscure),
                   ),
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Password is required';
-                return null;
+                    return null;
                   },
                 ),
                 const SizedBox(height: 28),

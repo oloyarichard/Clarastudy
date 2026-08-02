@@ -79,3 +79,32 @@ class WalletTopUpRequest {
     );
   }
 }
+
+class WithdrawalRequest {
+  WithdrawalRequest({
+    required this.id,
+    required this.teacherId,
+    required this.amount,
+    required this.momoNumber,
+    this.status = 'pending',
+    this.createdAt,
+  });
+
+  final String id;
+  final String teacherId;
+  final double amount;
+  final String momoNumber;
+  final String status; // pending | approved | rejected
+  final DateTime? createdAt;
+
+  factory WithdrawalRequest.fromJson(Map<String, dynamic> json) {
+    return WithdrawalRequest(
+      id: parseString(json['id']),
+      teacherId: parseString(json['teacher']),
+      amount: parseDouble(json['amount']),
+      momoNumber: parseString(json['momo_number']),
+      status: parseString(json['status'], fallback: 'pending'),
+      createdAt: parseDate(json['created_at']),
+    );
+  }
+}

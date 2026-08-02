@@ -26,6 +26,7 @@ class AdminDashboardScreen extends ConsumerWidget {
     final walletAsync = ref.watch(walletProvider);
     final pendingTeachersAsync = ref.watch(pendingTeachersProvider);
     final pendingTopUpsAsync = ref.watch(pendingTopUpsProvider);
+    final pendingWithdrawalsAsync = ref.watch(pendingWithdrawalsProvider);
     final currency = NumberFormat.currency(symbol: '\$');
 
     return Scaffold(
@@ -39,6 +40,7 @@ class AdminDashboardScreen extends ConsumerWidget {
           ref.invalidate(walletProvider);
           ref.invalidate(pendingTeachersProvider);
           ref.invalidate(pendingTopUpsProvider);
+          ref.invalidate(pendingWithdrawalsProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -144,6 +146,12 @@ class AdminDashboardScreen extends ConsumerWidget {
               label: 'Review wallet top-ups',
               count: pendingTopUpsAsync.asData?.value.length ?? 0,
               onTap: () => context.push('/admin/pending-topups'),
+            ),
+            _DutyTile(
+              icon: Icons.account_balance_wallet_rounded,
+              label: 'Review withdrawal requests',
+              count: pendingWithdrawalsAsync.asData?.value.length ?? 0,
+              onTap: () => context.push('/admin/pending-withdrawals'),
             ),
             const SizedBox(height: 20),
             const SectionHeader(title: 'Quick links'),

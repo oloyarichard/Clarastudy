@@ -85,6 +85,9 @@ class ApiConfig {
   static const String walletTopUp = '/payments/topup/';
   static const String pendingTopUps = '/payments/topup/pending/';
   static String reviewTopUp(String id) => '/payments/topup/$id/review/';
+  static const String withdrawalRequest = '/payments/withdraw/';
+  static const String pendingWithdrawals = '/payments/withdraw/pending/';
+  static String reviewWithdrawal(String id) => '/payments/withdraw/$id/review/';
 
   // Analytics
   static const String dashboard = '/analytics/dashboard/';

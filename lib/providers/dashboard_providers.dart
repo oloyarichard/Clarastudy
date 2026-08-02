@@ -27,3 +27,9 @@ final pendingTopUpsProvider = FutureProvider.autoDispose<List<WalletTopUpRequest
   final repo = ref.watch(paymentRepositoryProvider);
   return repo.listPendingTopUps();
 });
+
+/// Admin duty: teacher withdrawal requests awaiting review.
+final pendingWithdrawalsProvider = FutureProvider.autoDispose<List<WithdrawalRequest>>((ref) async {
+  final repo = ref.watch(paymentRepositoryProvider);
+  return repo.listPendingWithdrawals();
+});

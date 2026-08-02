@@ -15,10 +15,11 @@ class SplashScreen extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 100,
-              height: 100,
+              width: 88,
+              height: 88,
               decoration: BoxDecoration(
                 color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
               ),
               padding: const EdgeInsets.all(14),
               child: Image.asset(

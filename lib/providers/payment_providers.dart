@@ -21,3 +21,11 @@ final myTopUpsProvider = FutureProvider.autoDispose<List<WalletTopUpRequest>>((r
   final repo = ref.watch(paymentRepositoryProvider);
   return repo.myTopUps();
 });
+
+/// The teacher's own withdrawal requests — same idea as top-ups, shown
+/// in the wallet screen so an approved/rejected payout is visible, not
+/// just a silent balance change.
+final myWithdrawalsProvider = FutureProvider.autoDispose<List<WithdrawalRequest>>((ref) async {
+  final repo = ref.watch(paymentRepositoryProvider);
+  return repo.myWithdrawals();
+});
