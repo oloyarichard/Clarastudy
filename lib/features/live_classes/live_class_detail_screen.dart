@@ -6,6 +6,7 @@ import '../../core/network/api_exception.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_widgets.dart';
 import '../../core/widgets/state_views.dart';
+import '../../providers/core_providers.dart';
 import '../../providers/daily_call_session_provider.dart';
 import '../../providers/live_class_providers.dart';
 import 'daily_call_screen.dart';
@@ -18,19 +19,19 @@ import 'daily_call_screen.dart';
 /// before joining.
 class LiveClassDetailScreen extends ConsumerStatefulWidget {
   const LiveClassDetailScreen({super.key, required this.liveClassId});
-
+  
   final String liveClassId;
-
+  
   @override
   ConsumerState<LiveClassDetailScreen> createState() => _LiveClassDetailScreenState();
 }
 
 class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
   bool _joining = false;
-
+  
   Future<void> _joinCall(String title) async {
     final session = ref.read(dailyCallSessionProvider);
-
+    
     // Already in this exact class's call (e.g. it's minimized) — just
     // reopen the full-screen view, no need to fetch new credentials.
     if (session.hasActiveCall && session.liveClassId == widget.liveClassId) {
@@ -46,7 +47,7 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
       );
       return;
     }
-
+    
     // In a DIFFERENT class's call — confirm before dropping it.
     if (session.hasActiveCall && session.liveClassId != widget.liveClassId) {
       final confirmed = await showDialog<bool>(
@@ -65,12 +66,12 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
       if (confirmed != true) return;
       await session.leave();
     }
-
+    
     setState(() => _joining = true);
     try {
       final creds = await ref
-          .read(liveClassRepositoryProvider)
-          .getDailyCredentials(widget.liveClassId);
+      .read(liveClassRepositoryProvider)
+      .getDailyCredentials(widget.liveClassId);
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
@@ -95,11 +96,11 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
       if (mounted) setState(() => _joining = false);
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
     final classesAsync = ref.watch(liveClassesListProvider);
-
+    
     return Scaffold(
       appBar: AppBar(title: const Text('Live class')),
       body: classesAsync.when(
@@ -110,7 +111,7 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
             return const ErrorView(message: 'This live class could not be found.');
           }
           final formatter = DateFormat('EEEE, MMM d · h:mm a');
-
+          
           return Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
@@ -120,7 +121,7 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
                   children: [
                     Expanded(
                       child: Text(liveClass.title,
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                     ),
                     StatusChip(
                       label: liveClass.status == 'live' ? '● LIVE' : liveClass.status,
@@ -131,22 +132,22 @@ class _LiveClassDetailScreenState extends ConsumerState<LiveClassDetailScreen> {
                 if (liveClass.description != null) ...[
                   const SizedBox(height: 8),
                   Text(liveClass.description!,
-                      style: const TextStyle(color: AppColors.textSecondary)),
+                       style: const TextStyle(color: AppColors.textSecondary)),
                 ],
                 const SizedBox(height: 12),
                 if (liveClass.scheduledAt != null)
                   Text(formatter.format(liveClass.scheduledAt!.toLocal()),
-                      style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
-                const SizedBox(height: 20),
-                PrimaryButton(
-                  label: liveClass.isEnded
-                      ? 'Class ended'
-                      : (_joining ? 'Joining…' : 'Join class'),
+                  style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                  const SizedBox(height: 20),
+                  PrimaryButton(
+                    label: liveClass.isEnded
+                    ? 'Class ended'
+                  : (_joining ? 'Joining…' : 'Join class'),
                   icon: Icons.videocam_rounded,
                   onPressed: (liveClass.isEnded || _joining)
-                      ? null
-                      : () => _joinCall(liveClass.title),
-                ),
+                  ? null
+                  : () => _joinCall(liveClass.title),
+                  ),
               ],
             ),
           );
