@@ -93,3 +93,26 @@ class LiveChatMessage {
     );
   }
 }
+
+class RaisedHandEntry {
+  RaisedHandEntry({
+    required this.id,
+    required this.userId,
+    required this.userName,
+    this.raisedAt,
+  });
+
+  final String id;
+  final String userId;
+  final String userName;
+  final DateTime? raisedAt;
+
+  factory RaisedHandEntry.fromJson(Map<String, dynamic> json) {
+    return RaisedHandEntry(
+      id: parseString(json['id']),
+      userId: parseString(json['user']),
+      userName: parseString(json['user_name']),
+      raisedAt: parseDate(json['raised_at']),
+    );
+  }
+}

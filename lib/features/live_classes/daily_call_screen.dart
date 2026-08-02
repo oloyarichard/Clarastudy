@@ -497,6 +497,32 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
                           ],
                         ),
                       ),
+                      if (session.raisedHands.isNotEmpty)
+                        Positioned(
+                          top: 56,
+                          left: 16,
+                          right: 16,
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: session.raisedHands
+                                .map(
+                                  (entry) => Chip(
+                                    backgroundColor: AppColors.accent,
+                                    label: Text(
+                                      entry.userName,
+                                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                                    ),
+                                    avatar: const Icon(Icons.back_hand_rounded, color: Colors.white, size: 16),
+                                    onDeleted: session.isOwner ? () => session.lowerHand(entry.userId) : null,
+                                    deleteIcon: session.isOwner
+                                        ? const Icon(Icons.close_rounded, color: Colors.white, size: 16)
+                                        : null,
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ),
                       Positioned(
                         right: 16,
                         bottom: 100,
@@ -534,6 +560,14 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
                               color: AppColors.error,
                               onPressed: _leave,
                             ),
+                            if (!session.isOwner) ...[
+                              const SizedBox(width: 16),
+                              _CallControlButton(
+                                icon: Icons.back_hand_rounded,
+                                color: session.myHandRaised ? AppColors.accent : null,
+                                onPressed: () => session.toggleMyHand(),
+                              ),
+                            ],
                           ],
                         ),
                       ),

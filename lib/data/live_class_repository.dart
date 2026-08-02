@@ -78,4 +78,22 @@ class LiveClassRepository {
     );
     return LiveChatMessage.fromJson(response.data as Map<String, dynamic>);
   }
+
+  /// Everyone currently raising their hand in this class.
+  Future<List<RaisedHandEntry>> getRaisedHands(String liveClassId) async {
+    final response = await _api.get(ApiConfig.raisedHands(liveClassId));
+    final result = PaginatedResponse.fromDynamic(response.data, RaisedHandEntry.fromJson);
+    return result.results;
+  }
+
+  /// Toggles the current user's own hand — raises it if not already up,
+  /// lowers it if it is. Pass userId to lower someone ELSE's hand
+  /// (teacher-only on the backend).
+  Future<bool> toggleRaisedHand(String liveClassId, {String? userId}) async {
+    final response = await _api.post(
+      ApiConfig.raisedHandToggle(liveClassId),
+      data: userId != null ? {'user_id': userId} : {},
+    );
+    return (response.data as Map<String, dynamic>)['raised'] == true;
+  }
 }

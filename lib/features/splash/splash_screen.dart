@@ -21,10 +21,10 @@ class SplashScreen extends StatelessWidget {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
               ),
-              child: const Icon(
-                Icons.school_rounded,
-                color: AppColors.primary,
-                size: 48,
+              padding: const EdgeInsets.all(14),
+              child: Image.asset(
+                'assets/images/logo.png',
+                fit: BoxFit.contain,
               ),
             ),
             const SizedBox(height: 20),

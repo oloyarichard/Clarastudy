@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/utils/global_keys.dart';
+import '../data/live_class_repository.dart';
 import '../models/live_class_models.dart';
+import 'core_providers.dart';
 
 /// Holds the active Daily call's live state at the APP level, not inside
 /// DailyCallScreen's local state. This is what makes "minimize" actually
@@ -14,6 +16,10 @@ import '../models/live_class_models.dart';
 /// full-screen view re-attaches to this same client instead of joining
 /// again from scratch.
 class DailyCallSession extends ChangeNotifier {
+  DailyCallSession(this._repository);
+
+  final LiveClassRepository _repository;
+
   CallClient? client;
   String? liveClassId;
   String? liveClassTitle;
@@ -31,6 +37,13 @@ class DailyCallSession extends ChangeNotifier {
   bool allMuted = false;
   final Map<String, String> participants = {};
   StreamSubscription<Event>? _eventSubscription;
+
+  // Raise/lower hand — REST + polling, same reliable pattern as chat
+  // rather than an unverified Daily "app message" mechanism.
+  List<RaisedHandEntry> raisedHands = [];
+  bool myHandRaised = false;
+  Timer? _handsPollTimer;
+  String? _currentUserId;
 
   bool get hasActiveCall => client != null;
 
@@ -55,6 +68,9 @@ class DailyCallSession extends ChangeNotifier {
     cameraEnabled = true;
     isMinimized = false;
     allMuted = false;
+    raisedHands = [];
+    myHandRaised = false;
+    _currentUserId = currentUserId;
     notifyListeners();
 
     final newClient = await CallClient.create();
@@ -81,7 +97,60 @@ class DailyCallSession extends ChangeNotifier {
         microphone: MicrophoneInputSettingsUpdate.set(isEnabled: BoolUpdate.set(true)),
       ),
     );
+    _handsPollTimer?.cancel();
+    _handsPollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _pollRaisedHands());
     notifyListeners();
+  }
+
+  Future<void> _pollRaisedHands() async {
+    final id = liveClassId;
+    if (id == null) return;
+    try {
+      final fresh = await _repository.getRaisedHands(id);
+      final previousIds = raisedHands.map((h) => h.userId).toSet();
+      final newlyRaised = fresh.where((h) => !previousIds.contains(h.userId) && h.userId != _currentUserId);
+
+      // "Notification sent to everyone" — every participant polling
+      // this sees the same new-hand snackbar, not just the teacher.
+      for (final entry in newlyRaised) {
+        appScaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(content: Text('${entry.userName} raised their hand ✋')),
+        );
+      }
+
+      raisedHands = fresh;
+      myHandRaised = fresh.any((h) => h.userId == _currentUserId);
+      notifyListeners();
+    } catch (_) {
+      // A single failed poll isn't worth surfacing an error for — same
+      // reasoning as chat polling; it'll just pick up cleanly next tick.
+    }
+  }
+
+  /// Raises or lowers the CURRENT user's own hand.
+  Future<void> toggleMyHand() async {
+    final id = liveClassId;
+    if (id == null) return;
+    try {
+      myHandRaised = await _repository.toggleRaisedHand(id);
+      notifyListeners();
+      await _pollRaisedHands(); // refresh the full list immediately, don't wait for the next tick
+    } catch (_) {
+      // Leave state as it was — the next poll tick will reconcile
+      // reality either way, so a failed toggle isn't destructive.
+    }
+  }
+
+  /// Teacher-only (enforced server-side too): lowers someone ELSE's hand.
+  Future<void> lowerHand(String userId) async {
+    final id = liveClassId;
+    if (id == null || !isOwner) return;
+    try {
+      await _repository.toggleRaisedHand(id, userId: userId);
+      await _pollRaisedHands();
+    } catch (_) {
+      // Same reasoning as toggleMyHand() — next poll reconciles either way.
+    }
   }
 
   void _handleEvent(Event event, String? currentUserId) {
@@ -257,6 +326,7 @@ class DailyCallSession extends ChangeNotifier {
     // you've left — which is exactly why "hang up" wasn't fully hanging
     // up.
     await _eventSubscription?.cancel();
+    _handsPollTimer?.cancel();
     await client?.leave();
     await client?.dispose();
     _reset();
@@ -269,11 +339,14 @@ class DailyCallSession extends ChangeNotifier {
     isOwner = false;
     isMinimized = false;
     allMuted = false;
+    raisedHands = [];
+    myHandRaised = false;
+    _currentUserId = null;
     participants.clear();
     notifyListeners();
   }
 }
 
 final dailyCallSessionProvider = ChangeNotifierProvider<DailyCallSession>((ref) {
-  return DailyCallSession();
+  return DailyCallSession(ref.watch(liveClassRepositoryProvider));
 });

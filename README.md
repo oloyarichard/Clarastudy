@@ -108,4 +108,3 @@ lib/
 - Live class "Join" doesn't embed a WebRTC/video SDK — hook up your
   provider of choice (Agora, Daily, Jitsi, etc.) where indicated in
   `live_class_detail_screen.dart`.
-# Clarastudy2
