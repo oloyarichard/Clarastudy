@@ -217,83 +217,83 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
               const SizedBox(width: 2),
               Text('${course.totalStudents} students',
                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(course.title,
-               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-               const SizedBox(height: 8),
-               Text(course.description, style: const TextStyle(color: AppColors.textSecondary)),
-               const SizedBox(height: 20),
-               if (isStudent && enrollmentAsync != null)
-                 enrollmentAsync.when(
-                   data: (enrollment) {
-                     if (enrollment != null) {
-                       return StatusChip(
-                         label: 'Enrolled · ${enrollment.status}',
-                         color: AppColors.secondary,
+            ],),
+            const SizedBox(height: 12),
+            Text(course.title,
+                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                 const SizedBox(height: 8),
+                 Text(course.description, style: const TextStyle(color: AppColors.textSecondary)),
+                 const SizedBox(height: 20),
+                 if (isStudent && enrollmentAsync != null)
+                   enrollmentAsync.when(
+                     data: (enrollment) {
+                       if (enrollment != null) {
+                         return StatusChip(
+                           label: 'Enrolled · ${enrollment.status}',
+                           color: AppColors.secondary,
+                         );
+                       }
+                       return PrimaryButton(
+                         label: course.isFree
+                         ? 'Enroll for free'
+                       : 'Enroll · \$${course.price.toStringAsFixed(2)}',
+                       isLoading: _enrolling,
+                       onPressed: () => _enroll(course),
                        );
-                     }
-                     return PrimaryButton(
-                       label: course.isFree
-                       ? 'Enroll for free'
-                     : 'Enroll · \$${course.price.toStringAsFixed(2)}',
-                     isLoading: _enrolling,
-                     onPressed: () => _enroll(course),
-                     );
-                   },
-                   loading: () => const SizedBox(
-                     height: 52,
-                     child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                     },
+                     loading: () => const SizedBox(
+                       height: 52,
+                       child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                     ),
+                     error: (e, __) => const SizedBox.shrink(),
                    ),
-                   error: (e, __) => const SizedBox.shrink(),
-                 ),
-                 if (isOwner)
-                   OutlinedButton.icon(
-                     onPressed: () => _showAddModuleSheet(course.id),
-                     icon: const Icon(Icons.add_rounded),
-                     label: const Text('Add module'),
-                   ),
-                   const SizedBox(height: 24),
-                   Text('Curriculum · ${course.totalLessons} lessons',
-                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 10),
-                        if (course.modules.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
-                            child: Text('No modules published yet.',
-                                        style: TextStyle(color: AppColors.textSecondary)),
-                          )
-                          else
-                            ...course.modules.map((m) => _ModuleTile(module: m, isOwner: isOwner)),
-                            const SizedBox(height: 24),
-                            quizzesAsync.when(data: (quizzes) {
-                              if (quizzes.isEmpty) return const SizedBox.shrink();
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Quizzes',
-                                             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-                                             const SizedBox(height: 10),
-                                             ...quizzes.map(
-                                               (quiz) => Card(
-                                                 margin: const EdgeInsets.only(bottom: 8),
-                                                 child: ListTile(
-                                                   leading: const Icon(Icons.quiz_rounded, color: AppColors.primary),
-                                                   title: Text(quiz.title,
-                                                               style: const TextStyle(fontWeight: FontWeight.w600)),
-                                                               subtitle: Text('Passing score: ${quiz.passingScore}%'),
-                                                               trailing: const Icon(Icons.chevron_right_rounded),
-                                                               onTap: () => context.push('/quizzes/attempt', extra: quiz),
-                                                 ),
-                                               ),
-                                             ),
-                                ],
-                              );
-                            },
-                            loading: () => const SizedBox.shrink(),
-                            error: (e, __) => const SizedBox.shrink(),
-                            ),
+                   if (isOwner)
+                     OutlinedButton.icon(
+                       onPressed: () => _showAddModuleSheet(course.id),
+                       icon: const Icon(Icons.add_rounded),
+                       label: const Text('Add module'),
+                     ),
+                      const SizedBox(height: 24),
+                      Text('Curriculum · ${course.totalLessons} lessons',
+                           style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                           const SizedBox(height: 10),
+                           if (course.modules.isEmpty)
+                             const Padding(
+                               padding: EdgeInsets.symmetric(vertical: 12),
+                               child: Text('No modules published yet.',
+                                           style: TextStyle(color: AppColors.textSecondary)),
+                             )
+                             else
+                               ...course.modules.map((m) => _ModuleTile(module: m, isOwner: isOwner, course: course)),
+                               const SizedBox(height: 24),
+                               quizzesAsync.when(
+                                 data: (quizzes) {
+                                   if (quizzes.isEmpty) return const SizedBox.shrink();
+                                   return Column(
+                                     crossAxisAlignment: CrossAxisAlignment.start,
+                                     children: [
+                                       const Text('Quizzes',
+                                                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                                                  const SizedBox(height: 10),
+                                                  ...quizzes.map(
+                                                    (quiz) => Card(
+                                                      margin: const EdgeInsets.only(bottom: 8),
+                                                      child: ListTile(
+                                                        leading: const Icon(Icons.quiz_rounded, color: AppColors.primary),
+                                                        title: Text(quiz.title,
+                                                                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                                                                    subtitle: Text('Passing score: ${quiz.passingScore}%'),
+                                                                    trailing: const Icon(Icons.chevron_right_rounded),
+                                                                    onTap: () => context.push('/quizzes/attempt', extra: quiz),
+                                                      ),
+                                                    ),
+                                                  ),
+                                     ],
+                                   );
+                                 },
+                                 loading: () => const SizedBox.shrink(),
+                                 error: (e, __) => const SizedBox.shrink(),
+                               ),
         ],
       ),
     );
@@ -347,10 +347,11 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
 }
 
 class _ModuleTile extends ConsumerWidget {
-  const _ModuleTile({required this.module, required this.isOwner});
+  const _ModuleTile({required this.module, required this.isOwner, required this.course});
   
   final CourseModule module;
   final bool isOwner;
+  final Course course;
   
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -423,12 +424,7 @@ class _ModuleTile extends ConsumerWidget {
                           size: 16,
                           ),
                           label: Text(resource.title, style: const TextStyle(fontSize: 12)),
-                          onPressed: () async {
-                            final uri = Uri.tryParse(resource.fileUrl);
-                            if (uri != null) {
-                              await launchUrl(uri, mode: LaunchMode.externalApplication);
-                            }
-                          },
+                          onPressed: () => _openResource(context, ref, resource.id),
                         );
                       }).toList(),
                     ),
@@ -440,11 +436,76 @@ class _ModuleTile extends ConsumerWidget {
             ListTile(
               leading: const Icon(Icons.add_rounded, color: AppColors.primary),
               title: const Text('Add lesson'),
-              onTap: () => _showAddLessonSheet(context, ref, module.id),
-            ),
+              onTap: () => _showAddLessonSheet(context, ref, module.id),),
         ],
       ),
     );
+  }
+  
+  Future<void> _openResource(BuildContext context, WidgetRef ref, String resourceId) async {
+    try {
+      final fileUrl = await ref.read(resourceRepositoryProvider).checkResourceAccess(resourceId);
+      final uri = Uri.tryParse(fileUrl);
+      if (uri != null) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } on ApiException catch (e) {
+      if (e.statusCode == 403 && context.mounted) {
+        await _promptEnrollment(context, ref);
+      } else if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open this file.')),
+        );
+      }
+    }
+  }
+  
+  /// A condensed version of the full enroll flow on the course page
+  /// itself — confirms payment and enrolls directly. If the wallet
+  /// balance turns out to be insufficient, this points the student back
+  /// to the course page's own "Enroll" button, which has the full
+  /// top-up-request flow already built — not duplicated here to keep
+  /// this dialog small.
+  Future<void> _promptEnrollment(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Enrollment required'),
+        content: Text(
+          course.isFree
+          ? 'You need to enroll in "${course.title}" to access this resource. Enroll for free now?'
+        : 'You need to enroll in "${course.title}" to access this resource. '
+        '\$${course.price.toStringAsFixed(2)} will be deducted from your wallet. Continue?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enroll')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    
+    try {
+      await ref.read(enrollmentRepositoryProvider).enrollAndPay(courseId: course.id);
+      ref.invalidate(isEnrolledProvider(course.id));
+      ref.invalidate(walletProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enrolled — try opening the file again.')),
+        );
+      }
+    } on ApiException catch (e) {
+      if (context.mounted) {
+        final message = e.statusCode == 402
+        ? 'Insufficient wallet balance. Top up from the course page, then try again.'
+        : e.message;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
+    }
   }
   
   Future<void> _attachResource(BuildContext context, WidgetRef ref, String lessonId) async {
@@ -482,55 +543,102 @@ class _ModuleTile extends ConsumerWidget {
   void _showAddLessonSheet(BuildContext context, WidgetRef ref, String moduleId) {
     final titleController = TextEditingController();
     final videoController = TextEditingController();
+    PlatformFile? pickedFile;
+    bool submitting = false;
+    
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (sheetContext) => Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 20,
-          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('New lesson', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 16),
-            AppTextField(controller: titleController, label: 'Lesson title'),
-            const SizedBox(height: 12),
-            AppTextField(
-              controller: videoController,
-              label: 'Video URL (optional)',
-              hint: 'https://...',
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setLocalState) {
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 20,
+              bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 20,
             ),
-            const SizedBox(height: 16),
-            PrimaryButton(
-              label: 'Add lesson',
-              onPressed: () async {
-                if (titleController.text.trim().isEmpty) return;
-                try {
-                  await ref.read(courseRepositoryProvider).createLesson(
-                    moduleId: moduleId,
-                    title: titleController.text.trim(),
-                    videoUrl: videoController.text.trim().isEmpty
-                    ? null
-                    : videoController.text.trim(),
-                  );
-                  ref.invalidate(courseDetailProvider(module.courseId));
-                  if (sheetContext.mounted) Navigator.pop(sheetContext);
-                } catch (e) {
-                  if (sheetContext.mounted) {
-                    final message = e is ApiException ? e.message : 'Failed to add lesson.';
-            ScaffoldMessenger.of(sheetContext)
-            .showSnackBar(SnackBar(content: Text(message)));
-                  }
-                }
-              },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('New lesson', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 16),
+                AppTextField(controller: titleController, label: 'Lesson title'),
+                const SizedBox(height: 12),
+                AppTextField(
+                  controller: videoController,
+                  label: 'Video URL (optional)',
+                  hint: 'https://...',
+                ),
+                const SizedBox(height: 12),
+                // A lesson can have a linked video URL, an attached
+                // file (video/PDF/document the student downloads a
+                // real local copy of), both, or neither — this is
+                // purely optional, same as the URL field beside it.
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final result = await FilePicker.platform.pickFiles();
+                    if (result != null && result.files.single.path != null) {
+                      setLocalState(() => pickedFile = result.files.single);
+                    }
+                  },
+                  icon: const Icon(Icons.attach_file_rounded),
+                  label: Text(
+                    pickedFile == null
+                    ? 'Attach a file (optional)'
+                  : pickedFile!.name,
+                  overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                PrimaryButton(
+                  label: 'Add lesson',
+                  isLoading: submitting,
+                  onPressed: () async {
+                    if (titleController.text.trim().isEmpty) return;
+                    setLocalState(() => submitting = true);
+                    try {
+                      final lesson = await ref.read(courseRepositoryProvider).createLesson(
+                        moduleId: moduleId,
+                        title: titleController.text.trim(),
+                        videoUrl: videoController.text.trim().isEmpty
+                        ? null
+                        : videoController.text.trim(),
+                      );
+                      
+                      if (pickedFile != null) {
+                        final extension = (pickedFile!.extension ?? '').toLowerCase();
+                        final resourceType = extension == 'pdf'
+                ? 'pdf'
+                : ['mp4', 'mov', 'avi', 'mkv'].contains(extension)
+                ? 'video'
+                : 'document';
+                await ref.read(resourceRepositoryProvider).uploadResource(
+                  title: pickedFile!.name,
+                  resourceType: resourceType,
+                  filePath: pickedFile!.path!,
+                  lessonId: lesson.id,
+                );
+                      }
+                      
+                      ref.invalidate(courseDetailProvider(module.courseId));
+                      if (sheetContext.mounted) Navigator.pop(sheetContext);
+                    } catch (e) {
+                      setLocalState(() => submitting = false);
+                      if (sheetContext.mounted) {
+                        final message =
+                        e is ApiException ? e.message : 'Failed to add lesson.';
+                ScaffoldMessenger.of(sheetContext)
+                .showSnackBar(SnackBar(content: Text(message)));
+                      }
+                    }
+                  },
+                ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

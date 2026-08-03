@@ -23,6 +23,11 @@ class ApiConfig {
   // Auth
   static const String login = '/auth/login/';
   static const String refresh = '/auth/refresh/';
+  // Resources
+  static const String resources = '/resources/';
+  static const String resourceUpload = '/resources/upload/';
+  static const String myDownloads = '/resources/downloads/';
+  static String resourceAccess(String resourceId) => '/resources/$resourceId/access/';
 
   // Users
   static const String register = '/users/register/';
