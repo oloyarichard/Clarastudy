@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -19,29 +20,29 @@ import '../assessments/quiz_attempt_screen.dart';
 
 class CourseDetailScreen extends ConsumerStatefulWidget {
   const CourseDetailScreen({super.key, required this.courseId});
-
+  
   final String courseId;
-
+  
   @override
   ConsumerState<CourseDetailScreen> createState() => _CourseDetailScreenState();
 }
 
 class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
   bool _enrolling = false;
-
+  
   Future<void> _enroll(Course course) async {
     final user = ref.read(authProvider).user;
     if (user == null) return;
-
+    
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Confirm payment'),
         content: Text(
           course.isFree
-              ? 'Enroll in "${course.title}" for free?'
-              : '${course.price.toStringAsFixed(2)} will be deducted from your '
-                'wallet to enroll in "${course.title}". Continue?',
+          ? 'Enroll in "${course.title}" for free?'
+        : '${course.price.toStringAsFixed(2)} will be deducted from your '
+        'wallet to enroll in "${course.title}". Continue?',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -50,7 +51,7 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
       ),
     );
     if (confirmed != true) return;
-
+    
     setState(() => _enrolling = true);
     try {
       await ref.read(enrollmentRepositoryProvider).enrollAndPay(courseId: course.id);
@@ -59,7 +60,7 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
       ref.invalidate(walletProvider);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enrolled! Happy learning 🎉')),
+          const SnackBar(content: Text('Enrolled! Happy learning.')),
         );
       }
     } on ApiException catch (e) {
@@ -78,7 +79,7 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
       if (mounted) setState(() => _enrolling = false);
     }
   }
-
+  
   /// Shown when the backend reports insufficient wallet balance (HTTP 402).
   /// Walks the student through sending money to the platform's mobile
   /// money wallet, then submits a top-up request for an admin to approve.
@@ -87,7 +88,7 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
     final shortfall = details?['shortfall']?.toString() ?? '';
     final refController = TextEditingController();
     final amountController = TextEditingController(text: shortfall);
-
+    
     await showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -97,20 +98,24 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Your wallet balance is too low. Send at least $shortfall to '
-              '$momoNumber via mobile money, then enter the transaction '
-              'reference below. An admin will review and credit your wallet.',
+              'Your wallet balance is too low. Send at least \$$shortfall '
+            '(USD) to $momoNumber via mobile money, then enter the '
+            'transaction reference below. An admin will review and '
+            'credit your wallet.',
             ),
             const SizedBox(height: 16),
             TextField(
               controller: amountController,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: 'Amount sent'),
+              decoration: const InputDecoration(
+                labelText: 'Amount sent (USD)',
+                prefixText: '\$ ',
+              ),
             ),
             const SizedBox(height: 8),
             TextField(
               controller: refController,
-              decoration: const InputDecoration(labelText: 'Mobile money reference'),
+              decoration: const InputDecoration(labelText: 'Mobile payment reference ID'),
             ),
           ],
         ),
@@ -125,9 +130,9 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
               if (amount <= 0 || refController.text.trim().isEmpty) return;
               try {
                 await ref.read(paymentRepositoryProvider).submitTopUpRequest(
-                      amount: amount,
-                      momoReference: refController.text.trim(),
-                    );
+                  amount: amount,
+                  momoReference: refController.text.trim(),
+                );
                 if (dialogContext.mounted) Navigator.pop(dialogContext);
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -150,12 +155,12 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
       ),
     );
   }
-
+  
   @override
   Widget build(BuildContext context) {
     final courseAsync = ref.watch(courseDetailProvider(widget.courseId));
     final user = ref.watch(authProvider).user;
-
+    
     return Scaffold(
       appBar: AppBar(title: const Text('Course details')),
       body: courseAsync.when(
@@ -168,14 +173,14 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
       ),
     );
   }
-
+  
   Widget _buildBody(Course course, dynamic user) {
     final isOwner = user != null && user.id == course.teacherId;
     final isStudent = user != null && user.role == 'student';
     final enrollmentAsync =
-        isStudent ? ref.watch(isEnrolledProvider(course.id)) : null;
+    isStudent ? ref.watch(isEnrolledProvider(course.id)) : null;
     final quizzesAsync = ref.watch(quizzesForCourseProvider(course.id));
-
+    
     return RefreshIndicator(
       onRefresh: () async => ref.invalidate(courseDetailProvider(widget.courseId)),
       child: ListView(
@@ -187,12 +192,12 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
               width: double.infinity,
               height: 160,
               child: course.thumbnailUrl.isNotEmpty
-                  ? CachedNetworkImage(imageUrl: course.thumbnailUrl, fit: BoxFit.cover)
-                  : Container(
-                      color: AppColors.primary.withOpacity(0.1),
-                      child: const Icon(Icons.menu_book_rounded,
-                          size: 48, color: AppColors.primary),
-                    ),
+              ? CachedNetworkImage(imageUrl: course.thumbnailUrl, fit: BoxFit.cover)
+              : Container(
+                color: AppColors.primary.withOpacity(0.1),
+                child: const Icon(Icons.menu_book_rounded,
+                                  size: 48, color: AppColors.primary),
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -206,95 +211,94 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
               Icon(Icons.star_rounded, size: 16, color: AppColors.accent),
               const SizedBox(width: 2),
               Text('${course.rating.toStringAsFixed(1)}',
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(width: 8),
               Icon(Icons.groups_rounded, size: 16, color: AppColors.textSecondary),
               const SizedBox(width: 2),
               Text('${course.totalStudents} students',
-                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+                   style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 12),
           Text(course.title,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 8),
-          Text(course.description, style: const TextStyle(color: AppColors.textSecondary)),
-          const SizedBox(height: 20),
-          if (isStudent && enrollmentAsync != null)
-            enrollmentAsync.when(
-              data: (enrollment) {
-                if (enrollment != null) {
-                  return StatusChip(
-                    label: 'Enrolled · ${enrollment.status}',
-                    color: AppColors.secondary,
-                  );
-                }
-                return PrimaryButton(
-                  label: course.isFree
-                      ? 'Enroll for free'
-                      : 'Enroll · \$${course.price.toStringAsFixed(2)}',
-                  isLoading: _enrolling,
-                  onPressed: () => _enroll(course),
-                );
-              },
-              loading: () => const SizedBox(
-                height: 52,
-                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-              error: (e, __) => const SizedBox.shrink(),
-            ),
-          if (isOwner)
-            OutlinedButton.icon(
-              onPressed: () => _showAddModuleSheet(course.id),
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Add module'),
-            ),
-          const SizedBox(height: 24),
-          Text('Curriculum · ${course.totalLessons} lessons',
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 10),
-          if (course.modules.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text('No modules published yet.',
-                  style: TextStyle(color: AppColors.textSecondary)),
-            )
-          else
-            ...course.modules.map((m) => _ModuleTile(module: m, isOwner: isOwner)),
-          const SizedBox(height: 24),
-          quizzesAsync.when(
-            data: (quizzes) {
-              if (quizzes.isEmpty) return const SizedBox.shrink();
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Quizzes',
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 10),
-                  ...quizzes.map(
-                    (quiz) => Card(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        leading: const Icon(Icons.quiz_rounded, color: AppColors.primary),
-                        title: Text(quiz.title,
-                            style: const TextStyle(fontWeight: FontWeight.w600)),
-                        subtitle: Text('Passing score: ${quiz.passingScore}%'),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => context.push('/quizzes/attempt', extra: quiz),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (e, __) => const SizedBox.shrink(),
-          ),
+               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+               const SizedBox(height: 8),
+               Text(course.description, style: const TextStyle(color: AppColors.textSecondary)),
+               const SizedBox(height: 20),
+               if (isStudent && enrollmentAsync != null)
+                 enrollmentAsync.when(
+                   data: (enrollment) {
+                     if (enrollment != null) {
+                       return StatusChip(
+                         label: 'Enrolled · ${enrollment.status}',
+                         color: AppColors.secondary,
+                       );
+                     }
+                     return PrimaryButton(
+                       label: course.isFree
+                       ? 'Enroll for free'
+                     : 'Enroll · \$${course.price.toStringAsFixed(2)}',
+                     isLoading: _enrolling,
+                     onPressed: () => _enroll(course),
+                     );
+                   },
+                   loading: () => const SizedBox(
+                     height: 52,
+                     child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                   ),
+                   error: (e, __) => const SizedBox.shrink(),
+                 ),
+                 if (isOwner)
+                   OutlinedButton.icon(
+                     onPressed: () => _showAddModuleSheet(course.id),
+                     icon: const Icon(Icons.add_rounded),
+                     label: const Text('Add module'),
+                   ),
+                   const SizedBox(height: 24),
+                   Text('Curriculum · ${course.totalLessons} lessons',
+                        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 10),
+                        if (course.modules.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Text('No modules published yet.',
+                                        style: TextStyle(color: AppColors.textSecondary)),
+                          )
+                          else
+                            ...course.modules.map((m) => _ModuleTile(module: m, isOwner: isOwner)),
+                            const SizedBox(height: 24),
+                            quizzesAsync.when(data: (quizzes) {
+                              if (quizzes.isEmpty) return const SizedBox.shrink();
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Quizzes',
+                                             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                                             const SizedBox(height: 10),
+                                             ...quizzes.map(
+                                               (quiz) => Card(
+                                                 margin: const EdgeInsets.only(bottom: 8),
+                                                 child: ListTile(
+                                                   leading: const Icon(Icons.quiz_rounded, color: AppColors.primary),
+                                                   title: Text(quiz.title,
+                                                               style: const TextStyle(fontWeight: FontWeight.w600)),
+                                                               subtitle: Text('Passing score: ${quiz.passingScore}%'),
+                                                               trailing: const Icon(Icons.chevron_right_rounded),
+                                                               onTap: () => context.push('/quizzes/attempt', extra: quiz),
+                                                 ),
+                                               ),
+                                             ),
+                                ],
+                              );
+                            },
+                            loading: () => const SizedBox.shrink(),
+                            error: (e, __) => const SizedBox.shrink(),
+                            ),
         ],
       ),
     );
   }
-
+  
   void _showAddModuleSheet(String courseId) {
     final controller = TextEditingController();
     showModalBottomSheet(
@@ -321,16 +325,16 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
                 if (controller.text.trim().isEmpty) return;
                 try {
                   await ref.read(courseRepositoryProvider).createModule(
-                        courseId: courseId,
-                        title: controller.text.trim(),
-                      );
+                    courseId: courseId,
+                    title: controller.text.trim(),
+                  );
                   ref.invalidate(courseDetailProvider(courseId));
                   if (mounted) Navigator.pop(context);
                 } catch (e) {
                   if (mounted) {
                     final message = e is ApiException ? e.message : 'Failed to add module.';
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(SnackBar(content: Text(message)));
+            ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
                   }
                 }
               },
@@ -344,10 +348,10 @@ class _CourseDetailScreenState extends ConsumerState<CourseDetailScreen> {
 
 class _ModuleTile extends ConsumerWidget {
   const _ModuleTile({required this.module, required this.isOwner});
-
+  
   final CourseModule module;
   final bool isOwner;
-
+  
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Card(
@@ -357,38 +361,79 @@ class _ModuleTile extends ConsumerWidget {
         subtitle: Text('${module.lessons.length} lessons'),
         children: [
           ...module.lessons.map(
-            (lesson) => ListTile(
-              leading: Icon(
-                lesson.lessonType == 'video'
-                    ? Icons.play_circle_outline_rounded
-                    : lesson.lessonType == 'quiz'
-                        ? Icons.quiz_outlined
-                        : Icons.article_outlined,
-                color: AppColors.primary,
-              ),
-              title: Text(lesson.title),
-              subtitle: Text('${lesson.durationMinutes} min'
+            (lesson) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ListTile(
+                  leading: Icon(
+                    lesson.lessonType == 'video'
+                  ? Icons.play_circle_outline_rounded
+                  : lesson.lessonType == 'quiz'
+                  ? Icons.quiz_outlined
+                  : Icons.article_outlined,
+                  color: AppColors.primary,
+                  ),
+                  title: Text(lesson.title),
+                  subtitle: Text('${lesson.durationMinutes} min'
                   '${lesson.isFree ? ' · Free preview' : ''}'),
-              onTap: () async {
-                if (lesson.videoUrl != null && lesson.videoUrl!.isNotEmpty) {
-                  final uri = Uri.tryParse(lesson.videoUrl!);
-                  if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
-                } else if (lesson.content != null && context.mounted) {
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: Text(lesson.title),
-                      content: SingleChildScrollView(child: Text(lesson.content!)),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Close'),
+                  trailing: isOwner
+                  ? IconButton(
+                    icon: const Icon(Icons.attach_file_rounded, size: 20),
+                    tooltip: 'Attach a file',
+                    onPressed: () => _attachResource(context, ref, lesson.id),
+                  )
+                  : null,
+                  onTap: () async {
+                    if (lesson.videoUrl != null && lesson.videoUrl!.isNotEmpty) {
+                      final uri = Uri.tryParse(lesson.videoUrl!);
+                      if (uri != null) await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    } else if (lesson.content != null && context.mounted) {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: Text(lesson.title),
+                          content: SingleChildScrollView(child: Text(lesson.content!)),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('Close'),
+                            ),
+                          ],
                         ),
-                      ],
+                      );
+                    }
+                  },
+                ),
+                // Real, downloadable files attached to this lesson —
+                // students get their own local copy, not just a link.
+                if (lesson.resources.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 56, right: 16, bottom: 8),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: lesson.resources.map((resource) {
+                        return ActionChip(
+                          avatar: Icon(
+                            resource.resourceType == 'pdf'
+                          ? Icons.picture_as_pdf_outlined
+                          : resource.resourceType == 'video'
+                          ? Icons.movie_outlined
+                          : Icons.insert_drive_file_outlined,
+                          size: 16,
+                          ),
+                          label: Text(resource.title, style: const TextStyle(fontSize: 12)),
+                          onPressed: () async {
+                            final uri = Uri.tryParse(resource.fileUrl);
+                            if (uri != null) {
+                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                            }
+                          },
+                        );
+                      }).toList(),
                     ),
-                  );
-                }
-              },
+                  ),
+              ],
             ),
           ),
           if (isOwner)
@@ -401,7 +446,39 @@ class _ModuleTile extends ConsumerWidget {
       ),
     );
   }
-
+  
+  Future<void> _attachResource(BuildContext context, WidgetRef ref, String lessonId) async {
+    final result = await FilePicker.platform.pickFiles();
+    if (result == null || result.files.single.path == null) return;
+    final file = result.files.single;
+    final extension = (file.extension ?? '').toLowerCase();
+    final resourceType = extension == 'pdf'
+    ? 'pdf'
+    : ['mp4', 'mov', 'avi', 'mkv'].contains(extension)
+    ? 'video'
+    : 'document';
+    
+    try {
+      await ref.read(resourceRepositoryProvider).uploadResource(
+        title: file.name,
+        resourceType: resourceType,
+        filePath: file.path!,
+        lessonId: lessonId,
+      );
+      ref.invalidate(courseDetailProvider(module.courseId));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${file.name} attached.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        final message = e is ApiException ? e.message : 'Could not attach the file.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
+    }
+  }
+  
   void _showAddLessonSheet(BuildContext context, WidgetRef ref, String moduleId) {
     final titleController = TextEditingController();
     final videoController = TextEditingController();
@@ -435,19 +512,19 @@ class _ModuleTile extends ConsumerWidget {
                 if (titleController.text.trim().isEmpty) return;
                 try {
                   await ref.read(courseRepositoryProvider).createLesson(
-                        moduleId: moduleId,
-                        title: titleController.text.trim(),
-                        videoUrl: videoController.text.trim().isEmpty
-                            ? null
-                            : videoController.text.trim(),
-                      );
+                    moduleId: moduleId,
+                    title: titleController.text.trim(),
+                    videoUrl: videoController.text.trim().isEmpty
+                    ? null
+                    : videoController.text.trim(),
+                  );
                   ref.invalidate(courseDetailProvider(module.courseId));
                   if (sheetContext.mounted) Navigator.pop(sheetContext);
                 } catch (e) {
                   if (sheetContext.mounted) {
                     final message = e is ApiException ? e.message : 'Failed to add lesson.';
-                    ScaffoldMessenger.of(sheetContext)
-                        .showSnackBar(SnackBar(content: Text(message)));
+            ScaffoldMessenger.of(sheetContext)
+            .showSnackBar(SnackBar(content: Text(message)));
                   }
                 }
               },
