@@ -69,6 +69,18 @@ class WalletScreen extends ConsumerWidget {
                 ],
               ),
             ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => showDialog(
+                  context: context,
+                  builder: (_) => const _TopUpDialog(),
+                ),
+                icon: const Icon(Icons.add_card_rounded),
+                label: const Text('Top up'),
+              ),
+            ),
             if (isTeacher) ...[
               const SizedBox(height: 12),
               SizedBox(
@@ -311,6 +323,112 @@ class _WithdrawalTile extends StatelessWidget {
 /// mobile money number to receive it. The backend holds (deducts) the
 /// amount from their wallet the moment this is submitted, before any
 /// admin review — see WithdrawalRequestCreateView for why.
+/// The dialog behind the standalone "Top up" button — independent of
+/// any enrollment attempt, so a student (or teacher) can add funds to
+/// their wallet proactively at any time, not just when an enrollment
+/// fails for insufficient balance.
+class _TopUpDialog extends ConsumerStatefulWidget {
+  const _TopUpDialog();
+
+  @override
+  ConsumerState<_TopUpDialog> createState() => _TopUpDialogState();
+}
+
+class _TopUpDialogState extends ConsumerState<_TopUpDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _amountController = TextEditingController();
+  final _refController = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _refController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit(String momoNumber) async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _submitting = true);
+    try {
+      await ref.read(paymentRepositoryProvider).submitTopUpRequest(
+            amount: double.parse(_amountController.text.trim()),
+            momoReference: _refController.text.trim(),
+          );
+      ref.invalidate(myTopUpsProvider);
+      if (mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Top-up request submitted — an admin will review it shortly.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        final message = e is ApiException ? e.message : 'Could not submit the request.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final walletAsync = ref.watch(walletProvider);
+    final momoNumber = walletAsync.asData?.value.momoWalletNumber ?? '';
+
+    return AlertDialog(
+      title: const Text('Top up your wallet'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              momoNumber.isEmpty
+                  ? 'Send money via mobile money, then enter the details below.'
+                  : 'Send money to $momoNumber via mobile money, then enter the details below.',
+            ),
+            const SizedBox(height: 16),
+            AppTextField(
+              controller: _amountController,
+              label: 'Amount (USD)',
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              prefixIcon: Icons.attach_money_rounded,
+              validator: (v) {
+                final value = double.tryParse((v ?? '').trim());
+                if (value == null || value <= 0) return 'Enter a valid amount';
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            AppTextField(
+              controller: _refController,
+              label: 'Mobile payment reference ID',
+              prefixIcon: Icons.receipt_long_outlined,
+              validator: (v) {
+                if (v == null || v.trim().isEmpty) return 'Enter the payment reference';
+                return null;
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submitting ? null : () => _submit(momoNumber),
+          child: Text(_submitting ? 'Submitting…' : 'Submit'),
+        ),
+      ],
+    );
+  }
+}
+
 class _RequestWithdrawalDialog extends ConsumerStatefulWidget {
   const _RequestWithdrawalDialog();
 

@@ -4,11 +4,11 @@ import 'resource_models.dart';
 
 class Subject {
   Subject({required this.id, required this.name, this.description});
-  
+
   final String id;
   final String name;
   final String? description;
-  
+
   factory Subject.fromJson(Map<String, dynamic> json) {
     return Subject(
       id: parseString(json['id']),
@@ -31,7 +31,7 @@ class Lesson {
     this.isFree = false,
     this.resources = const [],
   });
-  
+
   final String id;
   final String moduleId;
   final String title;
@@ -42,7 +42,7 @@ class Lesson {
   final int order;
   final bool isFree;
   final List<Resource> resources;
-  
+
   factory Lesson.fromJson(Map<String, dynamic> json) {
     return Lesson(
       id: parseString(json['id']),
@@ -55,8 +55,8 @@ class Lesson {
       order: parseInt(json['order']),
       isFree: parseBool(json['is_free']),
       resources: (json['resources'] as List<dynamic>? ?? [])
-      .map((e) => Resource.fromJson(e as Map<String, dynamic>))
-      .toList(),
+          .map((e) => Resource.fromJson(e as Map<String, dynamic>))
+          .toList(),
     );
   }
 }
@@ -69,13 +69,13 @@ class CourseModule {
     this.order = 0,
     this.lessons = const [],
   });
-  
+
   final String id;
   final String courseId;
   final String title;
   final int order;
   final List<Lesson> lessons;
-  
+
   factory CourseModule.fromJson(Map<String, dynamic> json) {
     final rawLessons = json['lessons'];
     return CourseModule(
@@ -84,11 +84,11 @@ class CourseModule {
       title: parseString(json['title']),
       order: parseInt(json['order']),
       lessons: rawLessons is List
-      ? rawLessons
-      .whereType<Map<String, dynamic>>()
-      .map(Lesson.fromJson)
-      .toList()
-      : const [],
+          ? rawLessons
+              .whereType<Map<String, dynamic>>()
+              .map(Lesson.fromJson)
+              .toList()
+          : const [],
     );
   }
 }
@@ -108,7 +108,7 @@ class Course {
     this.createdAt,
     this.modules = const [],
   });
-  
+
   final String id;
   final String title;
   final String description;
@@ -121,13 +121,13 @@ class Course {
   final int totalStudents;
   final DateTime? createdAt;
   final List<CourseModule> modules;
-  
+
   bool get isFree => price <= 0;
   String get thumbnailUrl => ApiConfig.resolveMediaUrl(thumbnail);
-  
+
   int get totalLessons =>
-  modules.fold(0, (sum, m) => sum + m.lessons.length);
-  
+      modules.fold(0, (sum, m) => sum + m.lessons.length);
+
   factory Course.fromJson(Map<String, dynamic> json) {
     final rawModules = json['modules'];
     return Course(
@@ -143,11 +143,11 @@ class Course {
       totalStudents: parseInt(json['total_students']),
       createdAt: parseDate(json['created_at']),
       modules: rawModules is List
-      ? rawModules
-      .whereType<Map<String, dynamic>>()
-      .map(CourseModule.fromJson)
-      .toList()
-      : const [],
+          ? rawModules
+              .whereType<Map<String, dynamic>>()
+              .map(CourseModule.fromJson)
+              .toList()
+          : const [],
     );
   }
 }

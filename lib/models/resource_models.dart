@@ -5,6 +5,7 @@ class Resource {
   Resource({
     required this.id,
     required this.uploadedById,
+    required this.courseId,
     this.lessonId,
     required this.title,
     this.description,
@@ -13,9 +14,10 @@ class Resource {
     this.isDownloadable = true,
     this.createdAt,
   });
-  
+
   final String id;
   final String uploadedById;
+  final String courseId;
   final String? lessonId;
   final String title;
   final String? description;
@@ -23,13 +25,14 @@ class Resource {
   final String file;
   final bool isDownloadable;
   final DateTime? createdAt;
-  
+
   String get fileUrl => ApiConfig.resolveMediaUrl(file);
-  
+
   factory Resource.fromJson(Map<String, dynamic> json) {
     return Resource(
       id: parseString(json['id']),
       uploadedById: parseString(json['uploaded_by']),
+      courseId: parseString(json['course']),
       lessonId: json['lesson'] as String?,
       title: parseString(json['title']),
       description: json['description'] as String?,
@@ -50,14 +53,14 @@ class OfflineDownload {
     this.progress = 0,
     this.createdAt,
   });
-  
+
   final String id;
   final String userId;
   final String resourceId;
   final String status;
   final int progress;
   final DateTime? createdAt;
-  
+
   factory OfflineDownload.fromJson(Map<String, dynamic> json) {
     return OfflineDownload(
       id: parseString(json['id']),

@@ -36,17 +36,19 @@ class Payment {
 }
 
 class Wallet {
-  Wallet({required this.id, required this.userId, this.balance = 0});
+  Wallet({required this.id, required this.userId, this.balance = 0, this.momoWalletNumber});
 
   final String id;
   final String userId;
   final double balance;
+  final String? momoWalletNumber;
 
   factory Wallet.fromJson(Map<String, dynamic> json) {
     return Wallet(
       id: parseString(json['id']),
       userId: parseString(json['user']),
       balance: parseDouble(json['balance']),
+      momoWalletNumber: json['momo_wallet_number'] as String?,
     );
   }
 }

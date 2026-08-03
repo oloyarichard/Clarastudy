@@ -14,13 +14,13 @@ import 'notification_bell_action.dart';
 
 class StudentDashboardScreen extends ConsumerWidget {
   const StudentDashboardScreen({super.key});
-  
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(authProvider).user!;
     final statsAsync = ref.watch(dashboardStatsProvider);
     final enrollmentsAsync = ref.watch(myEnrollmentsProvider);
-    
+
     return Scaffold(
       appBar: AppBar(title: const Text('Home'), actions: const [NotificationBellAction()]),
       body: RefreshIndicator(
@@ -112,7 +112,7 @@ class StudentDashboardScreen extends ConsumerWidget {
                 return Column(
                   children: enrollments.take(5).map((enrollment) {
                     final courseAsync =
-                    ref.watch(courseDetailProvider(enrollment.courseId));
+                        ref.watch(courseDetailProvider(enrollment.courseId));
                     return courseAsync.when(
                       data: (course) => Padding(
                         padding: const EdgeInsets.only(bottom: 12),
@@ -151,42 +151,42 @@ class _QuickAction {
 class _QuickActionsRow extends StatelessWidget {
   const _QuickActionsRow({required this.items});
   final List<_QuickAction> items;
-  
+
   @override
   Widget build(BuildContext context) {
     return Row(
       children: items
-      .map(
-        (item) => Expanded(
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: item.onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.cardLight,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Icon(item.icon, color: AppColors.primary),
+          .map(
+            (item) => Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: item.onTap,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: AppColors.cardLight,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Icon(item.icon, color: AppColors.primary),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        item.label,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    item.label,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
-      )
-      .toList(),
+          )
+          .toList(),
     );
   }
 }

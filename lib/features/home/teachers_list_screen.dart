@@ -9,11 +9,11 @@ import '../../providers/dashboard_providers.dart';
 
 class TeachersListScreen extends ConsumerWidget {
   const TeachersListScreen({super.key});
-  
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final teachersAsync = ref.watch(teachersListProvider);
-    
+
     return Scaffold(
       appBar: AppBar(title: const Text('Teachers')),
       body: RefreshIndicator(
@@ -27,9 +27,9 @@ class TeachersListScreen extends ConsumerWidget {
               );
             }
             final approved = teachers.where((t) => t.isApproved).toList()
-            ..sort((a, b) => b.rating.compareTo(a.rating));
+              ..sort((a, b) => b.rating.compareTo(a.rating));
             final pending = teachers.where((t) => !t.isApproved).toList();
-            
+
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -61,7 +61,7 @@ class TeachersListScreen extends ConsumerWidget {
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel({required this.text});
   final String text;
-  
+
   @override
   Widget build(BuildContext context) {
     return Text(
@@ -79,7 +79,7 @@ class _SectionLabel extends StatelessWidget {
 class _TeacherCard extends StatelessWidget {
   const _TeacherCard({required this.teacher});
   final TeacherProfile teacher;
-  
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -113,8 +113,8 @@ class _TeacherCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       teacher.specialization?.isNotEmpty == true
-                      ? teacher.specialization!
-                      : teacher.user.email,
+                          ? teacher.specialization!
+                          : teacher.user.email,
                       style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -144,17 +144,17 @@ class _TeacherCard extends StatelessWidget {
               _StatBit(
                 icon: Icons.star_rounded,
                 label: teacher.totalReviews > 0
-                ? '${teacher.rating.toStringAsFixed(1)} (${teacher.totalReviews})'
-              : 'No reviews yet',
-              color: AppColors.accent,
+                    ? '${teacher.rating.toStringAsFixed(1)} (${teacher.totalReviews})'
+                    : 'No reviews yet',
+                color: AppColors.accent,
               ),
               const SizedBox(width: 16),
               _StatBit(
                 icon: Icons.work_history_rounded,
                 label: teacher.yearsOfExperience == 1
-                ? '1 year'
-              : '${teacher.yearsOfExperience} years',
-              color: AppColors.primary,
+                    ? '1 year'
+                    : '${teacher.yearsOfExperience} years',
+                color: AppColors.primary,
               ),
               if (teacher.hourlyRate > 0) ...[
                 const SizedBox(width: 16),
@@ -177,7 +177,7 @@ class _StatBit extends StatelessWidget {
   final IconData icon;
   final String label;
   final Color color;
-  
+
   @override
   Widget build(BuildContext context) {
     return Row(

@@ -6,7 +6,10 @@ import 'package:go_router/go_router.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_widgets.dart';
+import '../../models/course_models.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/core_providers.dart';
+import '../../providers/course_providers.dart';
 import '../../providers/resource_providers.dart';
 
 class UploadResourceScreen extends ConsumerStatefulWidget {
@@ -23,6 +26,7 @@ class _UploadResourceScreenState extends ConsumerState<UploadResourceScreen> {
   String _resourceType = 'document';
   PlatformFile? _file;
   bool _submitting = false;
+  String? _selectedCourseId;
 
   static const _types = ['document', 'pdf', 'video'];
 
@@ -48,6 +52,12 @@ class _UploadResourceScreenState extends ConsumerState<UploadResourceScreen> {
       );
       return;
     }
+    if (_selectedCourseId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Every resource must belong to a course — please pick one.')),
+      );
+      return;
+    }
 
     setState(() => _submitting = true);
     try {
@@ -56,6 +66,7 @@ class _UploadResourceScreenState extends ConsumerState<UploadResourceScreen> {
             description: _descriptionController.text.trim(),
             resourceType: _resourceType,
             filePath: _file!.path!,
+            courseId: _selectedCourseId!,
           );
       ref.invalidate(resourcesListProvider);
       if (mounted) {
@@ -90,6 +101,34 @@ class _UploadResourceScreenState extends ConsumerState<UploadResourceScreen> {
                   controller: _titleController,
                   label: 'Title',
                   validator: (v) => v == null || v.trim().isEmpty ? 'Title is required' : null,
+                ),
+                const SizedBox(height: 16),
+                Consumer(
+                  builder: (context, ref, _) {
+                    final teacherId = ref.watch(authProvider).user?.id ?? '';
+                    final coursesAsync = ref.watch(myTaughtCoursesProvider(teacherId));
+                    return coursesAsync.when(
+                      data: (courses) {
+                        return DropdownButtonFormField<String>(
+                          initialValue: _selectedCourseId,
+                          decoration: const InputDecoration(
+                            hintText: 'Select a course',
+                            helperText: 'Every resource belongs to a course.',
+                          ),
+                          items: courses
+                              .map((Course c) => DropdownMenuItem(
+                                    value: c.id,
+                                    child: Text(c.title, overflow: TextOverflow.ellipsis),
+                                  ))
+                              .toList(),
+                          onChanged: (value) => setState(() => _selectedCourseId = value),
+                          validator: (v) => v == null ? 'Please select a course' : null,
+                        );
+                      },
+                      loading: () => const LinearProgressIndicator(),
+                      error: (e, __) => Text('Could not load your courses: $e'),
+                    );
+                  },
                 ),
                 const SizedBox(height: 16),
                 AppTextField(

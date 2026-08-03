@@ -7,9 +7,9 @@ import '../models/resource_models.dart';
 
 class ResourceRepository {
   ResourceRepository(this._api);
-  
+
   final ApiClient _api;
-  
+
   Future<PaginatedResponse<Resource>> listResources({int page = 1}) async {
     final response = await _api.get(
       ApiConfig.resources,
@@ -17,26 +17,28 @@ class ResourceRepository {
     );
     return PaginatedResponse.fromDynamic(response.data, Resource.fromJson);
   }
-  
+
   Future<Resource> uploadResource({
     required String title,
     String? description,
     required String resourceType,
     required String filePath,
     bool isDownloadable = true,
+    required String courseId,
     String? lessonId,
   }) async {
     final response = await _api.postMultipart(ApiConfig.resourceUpload, {
       'title': title,
       if (description != null) 'description': description,
-        'resource_type': resourceType,
-        'is_downloadable': isDownloadable,
-        if (lessonId != null) 'lesson': lessonId,
-          'file': await MultipartFile.fromFile(filePath),
+      'resource_type': resourceType,
+      'is_downloadable': isDownloadable,
+      'course': courseId,
+      if (lessonId != null) 'lesson': lessonId,
+      'file': await MultipartFile.fromFile(filePath),
     });
     return Resource.fromJson(response.data as Map<String, dynamic>);
   }
-  
+
   Future<PaginatedResponse<OfflineDownload>> myDownloads({int page = 1}) async {
     final response = await _api.get(
       ApiConfig.myDownloads,
@@ -44,7 +46,7 @@ class ResourceRepository {
     );
     return PaginatedResponse.fromDynamic(response.data, OfflineDownload.fromJson);
   }
-  
+
   /// Checked before ever opening a resource's file. Throws an
   /// ApiException with statusCode 403 (and course_id/course_title/price
   /// in fieldErrors) if the resource is tied to a course the caller

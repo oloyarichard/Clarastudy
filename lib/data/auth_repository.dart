@@ -87,4 +87,24 @@ class AuthRepository {
   Future<bool> hasSession() => _tokenStorage.hasTokens();
 
   Future<void> logout() => _tokenStorage.clear();
+
+  /// Always succeeds from the app's point of view (matches the
+  /// backend's deliberate behavior of not revealing whether an email
+  /// is actually registered) — the real signal is whether an email
+  /// shows up.
+  Future<void> requestPasswordReset(String email) async {
+    await _api.post(ApiConfig.passwordResetRequest, data: {'email': email});
+  }
+
+  Future<void> confirmPasswordReset({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    await _api.post(ApiConfig.passwordResetConfirm, data: {
+      'email': email,
+      'code': code,
+      'new_password': newPassword,
+    });
+  }
 }

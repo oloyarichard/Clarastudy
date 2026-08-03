@@ -7,6 +7,7 @@ import '../../features/assessments/certificates_screen.dart';
 import '../../features/assessments/quiz_attempt_screen.dart';
 import '../../features/assessments/quiz_list_screen.dart';
 import '../../features/auth/login_screen.dart';
+import '../../features/auth/forgot_password_screen.dart';
 import '../../features/auth/register_screen.dart';
 import '../../features/chat/chat_room_screen.dart';
 import '../../features/chat/chat_rooms_screen.dart';
@@ -68,6 +69,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/splash', builder: (context, state) => const SplashScreen()),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(path: '/register', builder: (context, state) => const RegisterScreen()),
+      GoRoute(path: '/forgot-password', builder: (context, state) => const ForgotPasswordScreen()),
       GoRoute(path: '/home', builder: (context, state) => const HomeShell()),
 
       // NOTE: static-segment routes (e.g. /courses/create) must be
