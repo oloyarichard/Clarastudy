@@ -187,7 +187,8 @@ class DailyCallSession extends ChangeNotifier {
   }
 
   void _handleEvent(Event event, String? currentUserId) {
-    event.maybeWhen(participantJoined: (participant) {
+    event.maybeWhen(
+      participantJoined: (participant) {
         final id = participant.info.userId ?? '';
         final name = (participant.info.username?.isNotEmpty ?? false)
             ? participant.info.username!
@@ -222,4 +223,163 @@ class DailyCallSession extends ChangeNotifier {
       // mute never otherwise touches this client's local micEnabled/
       // cameraEnabled state. NOTE: inputs.microphone.isEnabled and
       // inputs.camera.isEnabled are a pattern-based inference (matching
-      // every other
+      // every other Settings/SettingsUpdate pair in this SDK, which has
+      // been reliable everywhere else so far) — InputSettings' own
+      // field types (CameraInputSettings, MicrophoneInputSettings) are
+      // confirmed real, but I did not fetch MicrophoneInputSettings'
+      // own field list directly to confirm .isEnabled by name.
+      inputsUpdated: (inputs) {
+        micEnabled = inputs.microphone.isEnabled;
+        cameraEnabled = inputs.camera.isEnabled;
+        notifyListeners();
+      },
+      orElse: () {},
+    );
+  }
+
+  void minimize() {
+    isMinimized = true;
+    notifyListeners();
+  }
+
+  void maximize() {
+    isMinimized = false;
+    notifyListeners();
+  }
+
+  Future<void> toggleMic() async {
+    micEnabled = !micEnabled;
+    await client?.updateInputs(
+      inputs: InputSettingsUpdate.set(
+        microphone: MicrophoneInputSettingsUpdate.set(isEnabled: BoolUpdate.set(micEnabled)),
+      ),
+    );
+    notifyListeners();
+  }
+
+  Future<void> toggleCamera() async {
+    cameraEnabled = !cameraEnabled;
+    await client?.updateInputs(
+      inputs: InputSettingsUpdate.set(
+        camera: CameraInputSettingsUpdate.set(isEnabled: BoolUpdate.set(cameraEnabled)),
+      ),
+    );
+    notifyListeners();
+  }
+
+  /// Confirmed via CallClient's own method list on pub.dev:
+  /// setCameraFacingMode({required MediaTrackFacingMode facingMode}). A
+  /// dedicated method — no nested settings/Update wrapper needed at all,
+  /// unlike the earlier (wrong) approach via updateInputs.
+  Future<void> flipCamera() async {
+    final c = client;
+    if (c == null) return;
+    final nextFacing =
+        usingFrontCamera ? MediaTrackFacingMode.environment : MediaTrackFacingMode.user;
+    await c.setCameraFacingMode(facingMode: nextFacing);
+    usingFrontCamera = !usingFrontCamera;
+    notifyListeners();
+  }
+
+  /// Owner-only: applies a set of RemoteParticipantUpdates in one call.
+  /// Confirmed via CallClient.updateRemoteParticipants's real signature:
+  /// the parameter is named `updates`, not `updatesById`, and it takes
+  /// a RemoteParticipantSettingsUpdatesById wrapper, not a raw Map
+  /// directly — both confirmed from the actual class docs.
+  Future<void> _updateRemoteParticipants(Map<String, RemoteParticipantUpdate> byId) async {
+    if (!isOwner || client == null || byId.isEmpty) return;
+    await client!.updateRemoteParticipants(
+      updates: RemoteParticipantSettingsUpdatesById.set(
+        updates: {for (final entry in byId.entries) ParticipantId(entry.key): entry.value},
+      ),
+    );
+  }
+
+  /// Owner-only remote mute for a single participant.
+  Future<void> muteParticipant(String participantId) async {
+    await _updateRemoteParticipants({
+      participantId: RemoteParticipantUpdate.set(
+        inputsEnabled: RemoteInputsEnabledUpdate.set(microphone: false),
+      ),
+    });
+  }
+
+  /// Owner-only: sets every current participant's microphone to the
+  /// given state in one call. Shared by muteAllParticipants() and
+  /// unmuteAllParticipants() below.
+  Future<void> _setAllMicrophones(bool enabled) async {
+    await _updateRemoteParticipants({
+      for (final id in participants.keys)
+        id: RemoteParticipantUpdate.set(
+          inputsEnabled: RemoteInputsEnabledUpdate.set(microphone: enabled),
+        ),
+    });
+  }
+
+  /// Owner-only: mutes every current participant's microphone — a
+  /// noise-free meeting where only the teacher (and whoever they
+  /// individually unmute) can be heard.
+  Future<void> muteAllParticipants() async {
+    await _setAllMicrophones(false);
+    allMuted = true;
+    notifyListeners();
+  }
+
+  /// Owner-only: resets every current participant's microphone to on —
+  /// an open meeting where each participant can then freely mute or
+  /// unmute themselves as they choose. This doesn't lock anyone's mic
+  /// on; it's a one-time reset, same as muteAllParticipants() is a
+  /// one-time reset the other direction.
+  Future<void> unmuteAllParticipants() async {
+    await _setAllMicrophones(true);
+    allMuted = false;
+    notifyListeners();
+  }
+
+  /// What the teacher's toggle button should do next, based on the
+  /// current mode.
+  Future<void> toggleMuteAll() async {
+    if (allMuted) {
+      await unmuteAllParticipants();
+    } else {
+      await muteAllParticipants();
+    }
+  }
+
+  Future<void> leave() async {
+    // dispose() IS confirmed to exist on CallClient (its own class docs:
+    // "Tear down and clean up all resources associated with this
+    // CallClient"). The earlier decision to skip it was based on the
+    // official demo's guidance that a CallClient CAN be reused across
+    // calls — but that guidance applies to reusing the SAME client
+    // object. This architecture creates a brand new CallClient on every
+    // start() instead, so the old one must be disposed here, or its
+    // native resources (camera/mic capture, the WebRTC connection
+    // itself) can keep running even after the Dart-side state says
+    // you've left — which is exactly why "hang up" wasn't fully hanging
+    // up.
+    await _eventSubscription?.cancel();
+    _handsPollTimer?.cancel();
+    await client?.leave();
+    await client?.dispose();
+    _reset();
+  }
+
+  void _reset() {
+    client = null;
+    liveClassId = null;
+    liveClassTitle = null;
+    isOwner = false;
+    isMinimized = false;
+    allMuted = false;
+    raisedHands = [];
+    myHandRaised = false;
+    _currentUserId = null;
+    participants.clear();
+    notifyListeners();
+  }
+}
+
+final dailyCallSessionProvider = ChangeNotifierProvider<DailyCallSession>((ref) {
+  return DailyCallSession(ref.watch(liveClassRepositoryProvider));
+});
