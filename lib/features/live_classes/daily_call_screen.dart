@@ -42,6 +42,19 @@ class DailyCallScreen extends ConsumerStatefulWidget {
 class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
   bool _joining = true;
   bool _immersive = true;
+  // Set the moment leave/minimize is tapped. Once true, build() stops
+  // touching session/controllers entirely — this is the real fix, not
+  // just reordering pop-vs-leave: Navigator.pop() isn't instant (there's
+  // an exit transition), so this screen can still be mounted and still
+  // rebuild in response to the session's notifyListeners() for a brief
+  // window after leave() runs. Without this flag, that rebuild would
+  // keep calling _syncRemoteControllers() — actively disposing video
+  // controllers — while Flutter's own widget diffing might simultaneously
+  // be tearing down the very VideoView bound to those same controllers,
+  // as part of the same fade-out transition. This flag stops that
+  // reactive teardown path entirely; the screen's own dispose() remains
+  // the single, well-defined place controllers actually get disposed.
+  bool _leaving = false;
   String? _errorMessage;
 
   // Confirmed API (pub.dev VideoViewController class docs, daily_flutter
@@ -257,7 +270,8 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
       final user = ref.read(authProvider).user;
       await session.start(
         liveClassId: widget.liveClassId,
-        liveClassTitle: widget.liveClassTitle,credentials: widget.credentials!,
+        liveClassTitle: widget.liveClassTitle,
+        credentials: widget.credentials!,
         currentUserId: user?.id,
       );
       if (mounted) setState(() => _joining = false);
@@ -278,14 +292,11 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
 
   Future<void> _leave() async {
     final session = ref.read(dailyCallSessionProvider);
-    // Pop FIRST, before the session actually tears down the client.
-    // Popping unmounts this screen, which disposes its own video
-    // controllers cleanly via dispose(). Only after that do we let the
-    // session reset (client = null, notifyListeners()) — if that reset
-    // happened first, while this screen was still mounted, its own
-    // rebuild would see client == null and start disposing remote video
-    // controllers that were still actively bound to on-screen VideoView
-    // widgets, since the pop hadn't actually unmounted them yet.
+    // Stop reacting to the session provider before anything else — this
+    // is what actually closes the race, not the pop/leave ordering
+    // alone (Navigator.pop() has a non-instant exit transition, so this
+    // screen can still rebuild in that window regardless of ordering).
+    setState(() => _leaving = true);
     if (mounted) Navigator.of(context).maybePop();
     await session.leave();
   }
@@ -433,7 +444,9 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
                       ),
                     ),
                   )
-                : Builder(builder: (context) {
+                : _leaving
+                  ? const ColoredBox(color: Colors.black)
+                  : Builder(builder: (context) {
                     _syncVideoTrack(session);
                     _syncRemoteControllers(session);
                     final mainRemote = _mainRemoteParticipant(session);
@@ -516,7 +529,8 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
                             children: session.raisedHands
                                 .map(
                                   (entry) => Chip(
-                                    backgroundColor: AppColors.accent,label: Text(
+                                    backgroundColor: AppColors.accent,
+                                    label: Text(
                                       entry.userName,
                                       style: const TextStyle(color: Colors.white, fontSize: 12),
                                     ),
