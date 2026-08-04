@@ -197,8 +197,7 @@ class DailyCallSession extends ChangeNotifier {
         notifyListeners();
 
         final isSelf = currentUserId != null && id == currentUserId;
-        if (isOwner && !isSelf) {
-          appScaffoldMessengerKey.currentState?.showSnackBar(
+        if (isOwner && !isSelf) {appScaffoldMessengerKey.currentState?.showSnackBar(
             SnackBar(content: Text('$name joined the class')),
           );
         }
@@ -358,11 +357,23 @@ class DailyCallSession extends ChangeNotifier {
     // itself) can keep running even after the Dart-side state says
     // you've left — which is exactly why "hang up" wasn't fully hanging
     // up.
+    //
+    // Order matters here: clear `client` and notifyListeners() BEFORE
+    // disposing the native resources, not after. Both DailyCallScreen
+    // AND MiniCallBubble render a VideoView bound to this client's
+    // track — if we disposed first and notified after, those widgets
+    // would still be actively displaying a track whose native resources
+    // had already been torn down out from under them, right up until
+    // the (later) rebuild removed them from the tree. Notifying first
+    // lets that rebuild happen — and remove the VideoView — before the
+    // native teardown that follows.
     await _eventSubscription?.cancel();
     _handsPollTimer?.cancel();
-    await client?.leave();
-    await client?.dispose();
+    final clientToDispose = client;
     _reset();
+
+    await clientToDispose?.leave();
+    await clientToDispose?.dispose();
   }
 
   void _reset() {
