@@ -14,15 +14,6 @@ import '../../providers/live_class_providers.dart';
 import 'camera_off_placeholder.dart';
 
 /// Full-screen, in-app Daily.co call for a live class.
-///
-/// The actual CallClient lives in [DailyCallSession] (an app-level
-/// provider), not here — that's what lets "minimize" work: minimizing
-/// just pops this route, the call itself keeps running in the
-/// background, and re-opening this screen re-attaches to the same
-/// client instead of rejoining. Pass [credentials] when actually
-/// starting a new call; omit it when re-opening an already-active one
-/// (e.g. from the minimized bubble) — in that case this screen just
-/// attaches to whatever's already in the session.
 class DailyCallScreen extends ConsumerStatefulWidget {
   const DailyCallScreen({
     super.key,
@@ -42,31 +33,14 @@ class DailyCallScreen extends ConsumerStatefulWidget {
 class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
   bool _joining = true;
   bool _immersive = true;
-  // Set the moment leave/minimize is tapped. Once true, build() stops
-  // touching session/controllers entirely — this is the real fix, not
-  // just reordering pop-vs-leave: Navigator.pop() isn't instant (there's
-  // an exit transition), so this screen can still be mounted and still
-  // rebuild in response to the session's notifyListeners() for a brief
-  // window after leave() runs. Without this flag, that rebuild would
-  // keep calling _syncRemoteControllers() — actively disposing video
-  // controllers — while Flutter's own widget diffing might simultaneously
-  // be tearing down the very VideoView bound to those same controllers,
-  // as part of the same fade-out transition. This flag stops that
-  // reactive teardown path entirely; the screen's own dispose() remains
-  // the single, well-defined place controllers actually get disposed.
   bool _leaving = false;
   String? _errorMessage;
 
-  // Confirmed API (pub.dev VideoViewController class docs, daily_flutter
-  // 0.38.0): create once, call setTrack() whenever the track changes,
-  // hand the controller itself to VideoView.
   final _videoController = VideoViewController();
   MediaStreamTrack? _lastTrack;
 
-  /// Pushes the local participant's current camera track into the
-  /// controller whenever it changes. Cheap to call on every build —
-  /// it no-ops via the _lastTrack check when nothing's actually changed.
   void _syncVideoTrack(DailyCallSession session) {
+    if (_leaving) return;
     final track = session.client?.participants.local.media?.camera.track;
     if (track != _lastTrack) {
       _lastTrack = track;
@@ -74,30 +48,21 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
     }
   }
 
-  // Remote participants' video — confirmed via pub.dev (Participants.remote,
-  // Participant.media?.camera.track, ParticipantInfo.isOwner). One
-  // VideoViewController per remote participant, created/disposed as
-  // people join and leave.
   final Map<String, VideoViewController> _remoteControllers = {};
   final Map<String, MediaStreamTrack?> _remoteLastTracks = {};
-
-  /// Which remote participant, if any, was tapped in the thumbnail strip
-  /// to become the main view. Null means "use the default" — the
-  /// moderator for a student, or nobody (show local) for the teacher.
   String? _pinnedRemoteId;
 
   void _syncRemoteControllers(DailyCallSession session) {
+    if (_leaving) return;
     final remote = session.client?.participants.remote ?? {};
     final currentIds = remote.keys.map((id) => id.id).toSet();
 
-    // Drop controllers for anyone who's left.
     final staleIds = _remoteControllers.keys.where((id) => !currentIds.contains(id)).toList();
     for (final id in staleIds) {
       _remoteControllers.remove(id)?.dispose();
       _remoteLastTracks.remove(id);
     }
 
-    // Add/update controllers for everyone currently present.
     for (final entry in remote.entries) {
       final id = entry.key.id;
       final track = entry.value.media?.camera.track;
@@ -109,9 +74,6 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
     }
   }
 
-  /// Returns (participantId, Participant) for whoever should be shown
-  /// full-size right now, or null to mean "show the local participant"
-  /// (the teacher's own default view, unchanged from before).
   MapEntry<String, Participant>? _mainRemoteParticipant(DailyCallSession session) {
     final remote = session.client?.participants.remote ?? {};
     if (remote.isEmpty) return null;
@@ -121,10 +83,9 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
       if (pinned.isNotEmpty) {
         return MapEntry(pinned.first.key.id, pinned.first.value);
       }
-      _pinnedRemoteId = null; // they left — fall through to the default
+      _pinnedRemoteId = null;
     }
 
-    // Default for a student: the moderator, if present.
     if (!session.isOwner) {
       final moderator = remote.entries.where((e) => e.value.info.isOwner);
       if (moderator.isNotEmpty) {
@@ -132,11 +93,11 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
       }
     }
 
-    return null; // teacher's own screen keeps showing themselves by default
+    return null;
   }
 
   Widget _localVideoTile(DailyCallSession session, {bool compact = false}) {
-    final showVideo = session.cameraEnabled && _lastTrack != null;
+    final showVideo = session.cameraEnabled && _lastTrack != null && !_leaving;
     return showVideo
         ? VideoView(controller: _videoController)
         : CameraOffPlaceholder(
@@ -147,7 +108,7 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
 
   Widget _remoteVideoTile(String id, Participant participant, {bool compact = false}) {
     final controller = _remoteControllers[id];
-    final showVideo = !participant.isCameraMuted && controller != null;
+    final showVideo = !participant.isCameraMuted && controller != null && !_leaving;
     return showVideo
         ? VideoView(controller: controller)
         : CameraOffPlaceholder(
@@ -158,14 +119,10 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
           );
   }
 
-  /// Horizontal scrollable strip of everyone NOT currently shown as the
-  /// main view — tap any tile to swap it into main. Always includes the
-  /// local participant as a tile (so you can tap back to "myself") when
-  /// a remote participant is currently pinned as main.
   Widget _thumbnailStrip(DailyCallSession session, String? mainRemoteId) {
     final remote = session.client?.participants.remote ?? {};
     final others = remote.entries.where((e) => e.key.id != mainRemoteId).toList();
-    final showLocalTile = mainRemoteId != null; // local is main by default, so only show it in the strip when it's NOT main
+    final showLocalTile = mainRemoteId != null;
 
     if (others.isEmpty && !showLocalTile) return const SizedBox.shrink();
 
@@ -249,8 +206,6 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
   Future<void> _ensureJoined() async {
     final session = ref.read(dailyCallSessionProvider);
 
-    // Re-opening an already-active call for this same class (e.g. from
-    // the minimized bubble) — nothing to do, just attach the UI.
     if (session.hasActiveCall && session.liveClassId == widget.liveClassId) {
       if (mounted) setState(() => _joining = false);
       return;
@@ -291,13 +246,13 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
   }
 
   Future<void> _leave() async {
+    if (mounted) {
+      setState(() => _leaving = true);
+    }
+    if (mounted) {
+      Navigator.of(context).maybePop();
+    }
     final session = ref.read(dailyCallSessionProvider);
-    // Stop reacting to the session provider before anything else — this
-    // is what actually closes the race, not the pop/leave ordering
-    // alone (Navigator.pop() has a non-instant exit transition, so this
-    // screen can still rebuild in that window regardless of ordering).
-    setState(() => _leaving = true);
-    if (mounted) Navigator.of(context).maybePop();
     await session.leave();
   }
 
@@ -376,32 +331,26 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
   Widget build(BuildContext context) {
     final session = ref.watch(dailyCallSessionProvider);
 
-    return PopScope(
-      // System back gesture always gets a real exit too — not just the
-      // in-UI buttons. onPopInvokedWithResult still lets the pop happen
-      // (canPop stays true); this just makes sure state is sane either
-      // way, so backing out never leaves a broken half-joined session
-      // sitting around confusing a later screen.
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: SafeArea(
-          child: _joining
-              ? Stack(
-                  children: [
-                    const Center(child: CircularProgressIndicator(color: Colors.white)),
-                    Positioned(
-                      top: 8,
-                      left: 8,
-                      child: TextButton.icon(
-                        onPressed: () => Navigator.of(context).maybePop(),
-                        style: TextButton.styleFrom(foregroundColor: Colors.white70),
-                        icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                        label: const Text('Cancel'),
-                      ),
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: _joining
+            ? Stack(
+                children: [
+                  const Center(child: CircularProgressIndicator(color: Colors.white)),
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: TextButton.icon(
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                      icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                      label: const Text('Cancel'),
                     ),
-                  ],
-                )
-              : _errorMessage != null
+                  ),
+                ],
+              )
+            : _errorMessage != null
                 ? Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
@@ -445,158 +394,158 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
                     ),
                   )
                 : _leaving
-                  ? const ColoredBox(color: Colors.black)
-                  : Builder(builder: (context) {
-                    _syncVideoTrack(session);
-                    _syncRemoteControllers(session);
-                    final mainRemote = _mainRemoteParticipant(session);
-                    return Stack(
-                      children: [
-                        if (session.client != null)
-                          Positioned.fill(
-                            child: mainRemote != null
-                                ? _remoteVideoTile(mainRemote.key, mainRemote.value)
-                                : _localVideoTile(session),
-                          ),
-                        if (session.client != null)
-                          Positioned(
-                            left: 16,
-                            bottom: 112,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if ((mainRemote?.value.isMicrophoneMuted ?? !session.micEnabled))
-                                  Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.black45,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(Icons.mic_off_rounded, color: Colors.white, size: 16),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        if (session.client != null)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: 96,
-                            child: _thumbnailStrip(session, mainRemote?.key),
-                          ),
-                        Positioned(
-                          top: 12,
-                        left: 16,
-                        right: 16,
-                        child: Row(
+                    ? const ColoredBox(color: Colors.black)
+                    : Builder(builder: (context) {
+                        if (_leaving) return const ColoredBox(color: Colors.black);
+                        _syncVideoTrack(session);
+                        _syncRemoteControllers(session);
+                        final mainRemote = _mainRemoteParticipant(session);
+                        return Stack(
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white),
-                              tooltip: 'Minimize',
-                              onPressed: _minimize,
-                            ),
-                            Expanded(
-                              child: Text(
-                                widget.liveClassTitle,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                                overflow: TextOverflow.ellipsis,
+                            if (session.client != null)
+                              Positioned.fill(
+                                child: mainRemote != null
+                                    ? _remoteVideoTile(mainRemote.key, mainRemote.value)
+                                    : _localVideoTile(session),
                               ),
-                            ),
-                            IconButton(
-                              icon: Icon(
-                                _immersive ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                                color: Colors.white,
+                            if (session.client != null)
+                              Positioned(
+                                left: 16,
+                                bottom: 112,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if ((mainRemote?.value.isMicrophoneMuted ?? !session.micEnabled))
+                                      Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: const BoxDecoration(
+                                          color: Colors.black45,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.mic_off_rounded, color: Colors.white, size: 16),
+                                      ),
+                                  ],
+                                ),
                               ),
-                              tooltip: _immersive ? 'Exit fullscreen' : 'Fullscreen',
-                              onPressed: _toggleFullscreen,
-                            ),
-                            if (session.isOwner)
-                              IconButton(
-                                icon: const Icon(Icons.people_alt_rounded, color: Colors.white),
-                                onPressed: () => _openParticipants(),
+                            if (session.client != null)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 96,
+                                child: _thumbnailStrip(session, mainRemote?.key),
                               ),
-                          ],
-                        ),
-                      ),
-                      if (session.raisedHands.isNotEmpty)
-                        Positioned(
-                          top: 56,
-                          left: 16,
-                          right: 16,
-                          child: Wrap(
-                            spacing: 6,
-                            runSpacing: 6,
-                            children: session.raisedHands
-                                .map(
-                                  (entry) => Chip(
-                                    backgroundColor: AppColors.accent,
-                                    label: Text(
-                                      entry.userName,
-                                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                                    ),
-                                    avatar: const Icon(Icons.back_hand_rounded, color: Colors.white, size: 16),
-                                    onDeleted: session.isOwner ? () => session.lowerHand(entry.userId) : null,
-                                    deleteIcon: session.isOwner
-                                        ? const Icon(Icons.close_rounded, color: Colors.white, size: 16)
-                                        : null,
+                            Positioned(
+                              top: 12,
+                              left: 16,
+                              right: 16,
+                              child: Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white),
+                                    tooltip: 'Minimize',
+                                    onPressed: _minimize,
                                   ),
-                                )
-                                .toList(),
-                          ),
-                        ),
-                      Positioned(
-                        right: 16,
-                        bottom: 100,
-                        child: FloatingActionButton(
-                          heroTag: 'live-class-chat-fab',
-                          backgroundColor: AppColors.primary,
-                          onPressed: _openAppChat,
-                          child: const Icon(Icons.chat_bubble_rounded, color: Colors.white),
-                        ),
-                      ),
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 24,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _CallControlButton(
-                              icon: session.micEnabled ? Icons.mic_rounded : Icons.mic_off_rounded,
-                              onPressed: () => session.toggleMic(),
-                            ),
-                            const SizedBox(width: 16),
-                            _CallControlButton(
-                              icon: session.cameraEnabled ? Icons.videocam_rounded : Icons.videocam_off_rounded,
-                              onPressed: () => session.toggleCamera(),
-                            ),
-                            const SizedBox(width: 16),
-                            _CallControlButton(
-                              icon: Icons.cameraswitch_rounded,
-                              onPressed: _flipCamera,
-                            ),
-                            const SizedBox(width: 16),
-                            _CallControlButton(
-                              icon: Icons.call_end_rounded,
-                              color: AppColors.error,
-                              onPressed: _leave,
-                            ),
-                            if (!session.isOwner) ...[
-                              const SizedBox(width: 16),
-                              _CallControlButton(
-                                icon: Icons.back_hand_rounded,
-                                color: session.myHandRaised ? AppColors.accent : null,
-                                onPressed: () => session.toggleMyHand(),
+                                  Expanded(
+                                    child: Text(
+                                      widget.liveClassTitle,
+                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: Icon(
+                                      _immersive ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                                      color: Colors.white,
+                                    ),
+                                    tooltip: _immersive ? 'Exit fullscreen' : 'Fullscreen',
+                                    onPressed: _toggleFullscreen,
+                                  ),
+                                  if (session.isOwner)
+                                    IconButton(
+                                      icon: const Icon(Icons.people_alt_rounded, color: Colors.white),
+                                      onPressed: () => _openParticipants(),
+                                    ),
+                                ],
                               ),
-                            ],
+                            ),
+                            if (session.raisedHands.isNotEmpty)
+                              Positioned(
+                                top: 56,
+                                left: 16,
+                                right: 16,
+                                child: Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: session.raisedHands
+                                      .map(
+                                        (entry) => Chip(
+                                          backgroundColor: AppColors.accent,
+                                          label: Text(
+                                            entry.userName,
+                                            style: const TextStyle(color: Colors.white, fontSize: 12),
+                                          ),
+                                          avatar: const Icon(Icons.back_hand_rounded, color: Colors.white, size: 16),
+                                          onDeleted: session.isOwner ? () => session.lowerHand(entry.userId) : null,
+                                          deleteIcon: session.isOwner
+                                              ? const Icon(Icons.close_rounded, color: Colors.white, size: 16)
+                                              : null,
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ),
+                            Positioned(
+                              right: 16,
+                              bottom: 100,
+                              child: FloatingActionButton(
+                                heroTag: 'live-class-chat-fab',
+                                backgroundColor: AppColors.primary,
+                                onPressed: _openAppChat,
+                                child: const Icon(Icons.chat_bubble_rounded, color: Colors.white),
+                              ),
+                            ),
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 24,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  _CallControlButton(
+                                    icon: session.micEnabled ? Icons.mic_rounded : Icons.mic_off_rounded,
+                                    onPressed: () => session.toggleMic(),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  _CallControlButton(
+                                    icon: session.cameraEnabled ? Icons.videocam_rounded : Icons.videocam_off_rounded,
+                                    onPressed: () => session.toggleCamera(),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  _CallControlButton(
+                                    icon: Icons.cameraswitch_rounded,
+                                    onPressed: _flipCamera,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  _CallControlButton(
+                                    icon: Icons.call_end_rounded,
+                                    color: AppColors.error,
+                                    onPressed: _leave,
+                                  ),
+                                  if (!session.isOwner) ...[
+                                    const SizedBox(width: 16),
+                                    _CallControlButton(
+                                      icon: Icons.back_hand_rounded,
+                                      color: session.myHandRaised ? AppColors.accent : null,
+                                      onPressed: () => session.toggleMyHand(),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
                           ],
-                        ),
-                      ),
-                      ],
-                    );
-                  }),
+                        );
+                      }),
       ),
-    ),
     );
   }
 }
@@ -621,9 +570,6 @@ class _CallControlButton extends StatelessWidget {
   }
 }
 
-/// The app's own live-class chat (REST-backed) — unchanged, and still
-/// backed by the same persisted history as before; nothing about the
-/// Daily migration touched this.
 class _LiveClassChatSheet extends ConsumerStatefulWidget {
   const _LiveClassChatSheet({required this.liveClassId});
 
@@ -653,14 +599,6 @@ class _LiveClassChatSheetState extends ConsumerState<_LiveClassChatSheet> {
   @override
   void initState() {
     super.initState();
-    // Chat is REST-backed, not a live socket — poll while this sheet is
-    // open so messages from other participants actually show up without
-    // requiring you to send something yourself to trigger a refresh.
-    // 1 second is close to the practical floor for REST polling without
-    // hammering the server — true instant delivery would need a
-    // WebSocket (Django Channels is already in this project's stack for
-    // that, just not wired up for chat yet). This is the fast-as-
-    // reasonable version of the polling approach, not literal real-time.
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) ref.invalidate(liveChatProvider(widget.liveClassId));
     });
@@ -730,28 +668,28 @@ class _LiveClassChatSheetState extends ConsumerState<_LiveClassChatSheet> {
                         WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
                       }
                       return ListView.builder(
-                      controller: scrollController,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: messages.length,
-                      itemBuilder: (context, index) {
-                        final msg = messages[index];
-                        final isMine = msg.userId == user?.id;
-                        return Align(
-                          alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: isMine ? AppColors.primary : AppColors.surfaceLight,
-                              borderRadius: BorderRadius.circular(14),
+                        controller: scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final msg = messages[index];
+                          final isMine = msg.userId == user?.id;
+                          return Align(
+                            alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: isMine ? AppColors.primary : AppColors.surfaceLight,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Text(
+                                msg.message,
+                                style: TextStyle(color: isMine ? Colors.white : AppColors.textPrimary),
+                              ),
                             ),
-                            child: Text(
-                              msg.message,
-                              style: TextStyle(color: isMine ? Colors.white : AppColors.textPrimary),
-                            ),
-                          ),
-                        );
-                      },
+                          );
+                        },
                       );
                     },
                     loading: () => const Center(child: CircularProgressIndicator()),
