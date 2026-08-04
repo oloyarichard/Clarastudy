@@ -257,8 +257,7 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
       final user = ref.read(authProvider).user;
       await session.start(
         liveClassId: widget.liveClassId,
-        liveClassTitle: widget.liveClassTitle,
-        credentials: widget.credentials!,
+        liveClassTitle: widget.liveClassTitle,credentials: widget.credentials!,
         currentUserId: user?.id,
       );
       if (mounted) setState(() => _joining = false);
@@ -517,8 +516,7 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
                                     onDeleted: session.isOwner ? () => session.lowerHand(entry.userId) : null,
                                     deleteIcon: session.isOwner
                                         ? const Icon(Icons.close_rounded, color: Colors.white, size: 16)
-                                        : null,
-                                  ),
+                                        : null,),
                                 )
                                 .toList(),
                           ),
