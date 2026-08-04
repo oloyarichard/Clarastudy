@@ -277,8 +277,17 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
   }
 
   Future<void> _leave() async {
-    await ref.read(dailyCallSessionProvider).leave();
+    final session = ref.read(dailyCallSessionProvider);
+    // Pop FIRST, before the session actually tears down the client.
+    // Popping unmounts this screen, which disposes its own video
+    // controllers cleanly via dispose(). Only after that do we let the
+    // session reset (client = null, notifyListeners()) — if that reset
+    // happened first, while this screen was still mounted, its own
+    // rebuild would see client == null and start disposing remote video
+    // controllers that were still actively bound to on-screen VideoView
+    // widgets, since the pop hadn't actually unmounted them yet.
     if (mounted) Navigator.of(context).maybePop();
+    await session.leave();
   }
 
   Future<void> _flipCamera() async {
@@ -507,8 +516,7 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
                             children: session.raisedHands
                                 .map(
                                   (entry) => Chip(
-                                    backgroundColor: AppColors.accent,
-                                    label: Text(
+                                    backgroundColor: AppColors.accent,label: Text(
                                       entry.userName,
                                       style: const TextStyle(color: Colors.white, fontSize: 12),
                                     ),
@@ -516,7 +524,8 @@ class _DailyCallScreenState extends ConsumerState<DailyCallScreen> {
                                     onDeleted: session.isOwner ? () => session.lowerHand(entry.userId) : null,
                                     deleteIcon: session.isOwner
                                         ? const Icon(Icons.close_rounded, color: Colors.white, size: 16)
-                                        : null,),
+                                        : null,
+                                  ),
                                 )
                                 .toList(),
                           ),
