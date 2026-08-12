@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/call_permissions.dart';
 import '../../models/live_class_models.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/core_providers.dart';
@@ -58,6 +59,7 @@ class _DailyCallScreenState
   bool _minimizing = false;
 
   String? _errorMessage;
+  bool _permissionPermanentlyDenied = false;
 
   final VideoViewController _videoController =
       VideoViewController();
@@ -78,6 +80,34 @@ class _DailyCallScreenState
 
     _enterImmersive();
 
+    final session = ref.read(dailyCallSessionProvider);
+
+    session.addTrackReleaseCallback(_releaseAllTracks);
+
+    // IMPORTANT for the bubble -> full screen transition.
+    //
+    // _joining used to start as `true` unconditionally, and only flipped to
+    // false inside a post-frame callback. So re-opening an ALREADY RUNNING
+    // call still painted a black screen with a spinner for at least one
+    // frame before showing video. That flash was the "delay" when switching
+    // out of the bubble.
+    //
+    // If the call is already live, there is nothing to join — say so now,
+    // synchronously, before the first frame is ever built.
+    final alreadyLive = session.hasActiveCall &&
+        session.liveClassId == widget.liveClassId;
+
+    _joining = !alreadyLive;
+
+    if (alreadyLive) {
+      // Attach this screen's renderers to the live tracks straight away.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _leaving || _minimizing) return;
+        setState(() {});
+      });
+      return;
+    }
+
     // Do not initialize Daily while the native Flutter route/view
     // hierarchy is still being created.
     WidgetsBinding.instance.addPostFrameCallback(
@@ -87,6 +117,30 @@ class _DailyCallScreenState
         }
       },
     );
+  }
+
+  /// Invoked by DailyCallSession right before the native client is
+  /// destroyed. Every controller must let go of its track here — disposing
+  /// the native client while a VideoViewController still points at a track
+  /// is a use-after-free, and that is what took the app down on hang-up.
+  void _releaseAllTracks() {
+    _lastTrack = null;
+
+    try {
+      _videoController.setTrack(null);
+    } catch (e) {
+      debugPrint('Local track release failed: $e');
+    }
+
+    for (final entry in _remoteControllers.entries) {
+      try {
+        entry.value.setTrack(null);
+      } catch (e) {
+        debugPrint('Remote track release failed: $e');
+      }
+    }
+
+    _remoteLastTracks.clear();
   }
 
   @override
@@ -104,6 +158,14 @@ class _DailyCallScreenState
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.edgeToEdge,
     );
+
+    // Stop the session from calling back into a dead State.
+    ref
+        .read(dailyCallSessionProvider)
+        .removeTrackReleaseCallback(_releaseAllTracks);
+
+    // Detach before destroying, always in that order.
+    _releaseAllTracks();
 
     _videoController.dispose();
 
@@ -218,6 +280,17 @@ class _DailyCallScreenState
           _joining = false;
         });
       }
+    } on CallPermissionException catch (e) {
+      // This is the crash the app used to have: Daily's SDK does not ask
+      // for camera/mic permission itself, so creating a CallClient without
+      // it previously took the whole app down instead of surfacing here.
+      if (mounted && !_leaving) {
+        setState(() {
+          _joining = false;
+          _errorMessage = e.message;
+          _permissionPermanentlyDenied = e.permanentlyDenied;
+        });
+      }
     } catch (e, stackTrace) {
       debugPrint(
         'Daily start error: $e',
@@ -231,7 +304,8 @@ class _DailyCallScreenState
         setState(() {
           _joining = false;
           _errorMessage =
-              'Could not join the call: $e';
+              'Could not join the call. Check your connection and try again.';
+          _permissionPermanentlyDenied = false;
         });
       }
     } finally {
@@ -271,33 +345,33 @@ class _DailyCallScreenState
       dailyCallSessionProvider,
     );
 
-    try {
-      // The provider owns the native Daily lifecycle.
-      //
-      // This call must be awaited.
-      //
-      // The screen must NOT directly call:
-      //
-      // session.client?.leave()
-      // session.client?.dispose()
-      //
-      await session.leave();
-    } catch (e, stackTrace) {
-      debugPrint(
-        'Daily leave error: $e',
-      );
+    // Detach this screen's renderers from Daily tracks NOW, while the route
+    // and its widgets are still alive and able to do it safely.
+    _releaseAllTracks();
 
-      debugPrint(
-        'Daily leave stack trace:\n$stackTrace',
-      );
-    }
+    // Kick off the native teardown, but DO NOT block the UI on it.
+    //
+    // The old code awaited session.leave() — native leave + dispose, which
+    // can take seconds on a bad connection — and only popped afterwards.
+    // The user pressed "end call" and sat looking at a frozen call screen.
+    // That is the "hanging up" problem.
+    //
+    // The provider is idempotent and owns the whole lifecycle, so it is safe
+    // to let it finish after this route is gone.
+    final teardown = session.leave();
+
+    unawaited(
+      teardown.catchError((Object e, StackTrace stackTrace) {
+        debugPrint('Daily leave error: $e');
+        debugPrint('Daily leave stack trace:\n$stackTrace');
+      }),
+    );
 
     if (!mounted) {
       return;
     }
 
-    // Only pop after the Daily session has finished
-    // its native cleanup.
+    // Pop immediately — the call is already logically over.
     Navigator.of(context).pop();
   }
 
@@ -385,8 +459,11 @@ class _DailyCallScreenState
   void _syncVideoTrack(
     DailyCallSession session,
   ) {
+    // Deliberately NOT guarded by _minimizing: video must keep updating
+    // through the minimize fade, or the frozen last frame is what read as
+    // "visual delay" when switching to the bubble.
     if (_leaving ||
-        _minimizing ||
+        session.isTearingDown ||
         !mounted) {
       return;
     }
@@ -402,8 +479,7 @@ class _DailyCallScreenState
     if (track != _lastTrack) {
       _lastTrack = track;
 
-      if (!_leaving &&
-          !_minimizing) {
+      if (!_leaving) {
         _videoController.setTrack(
           track,
         );
@@ -414,8 +490,10 @@ class _DailyCallScreenState
   void _syncRemoteControllers(
     DailyCallSession session,
   ) {
+    // Same reasoning as _syncVideoTrack: keep syncing through the minimize
+    // fade.
     if (_leaving ||
-        _minimizing ||
+        session.isTearingDown ||
         !mounted) {
       return;
     }
@@ -443,9 +521,7 @@ class _DailyCallScreenState
             .toList();
 
     for (final id in staleIds) {
-      if (_leaving ||
-          _minimizing ||
-          !mounted) {
+      if (_leaving || !mounted) {
         return;
       }
 
@@ -464,9 +540,7 @@ class _DailyCallScreenState
     // remote participants.
     for (final entry
         in remote.entries) {
-      if (_leaving ||
-          _minimizing ||
-          !mounted) {
+      if (_leaving || !mounted) {
         return;
       }
 
@@ -485,9 +559,7 @@ class _DailyCallScreenState
           track) {
         _remoteLastTracks[id] = track;
 
-        if (!_leaving &&
-            !_minimizing &&
-            mounted) {
+        if (!_leaving && mounted) {
           controller.setTrack(track);
         }
       }
@@ -502,8 +574,7 @@ class _DailyCallScreenState
       _mainRemoteParticipant(
     DailyCallSession session,
   ) {
-    if (_leaving ||
-        _minimizing) {
+    if (_leaving) {
       return null;
     }
 
@@ -563,8 +634,9 @@ class _DailyCallScreenState
     DailyCallSession session, {
     bool compact = false,
   }) {
-    if (_leaving ||
-        _minimizing) {
+    // Only a real teardown blanks the tile. Minimizing keeps rendering so
+    // the fade to the bubble stays continuous instead of flashing black.
+    if (_leaving) {
       return const ColoredBox(
         color: Colors.black,
       );
@@ -603,8 +675,7 @@ class _DailyCallScreenState
     Participant participant, {
     bool compact = false,
   }) {
-    if (_leaving ||
-        _minimizing) {
+    if (_leaving) {
       return const ColoredBox(
         color: Colors.black,
       );
@@ -646,8 +717,7 @@ class _DailyCallScreenState
     DailyCallSession session,
     String? mainRemoteId,
   ) {
-    if (_leaving ||
-        _minimizing) {
+    if (_leaving) {
       return const SizedBox.shrink();
     }
 
@@ -1024,9 +1094,12 @@ class _DailyCallScreenState
                               MainAxisSize
                                   .min,
                           children: [
-                            const Icon(
-                              Icons
-                                  .wifi_off_rounded,
+                            Icon(
+                              _permissionPermanentlyDenied
+                                  ? Icons
+                                      .videocam_off_rounded
+                                  : Icons
+                                      .wifi_off_rounded,
                               color:
                                   Colors.white54,
                               size: 48,
@@ -1086,30 +1159,34 @@ class _DailyCallScreenState
                                       _starting ||
                                               _leaving
                                           ? null
-                                          : () {
-                                              setState(
-                                                () {
-                                                  _errorMessage =
-                                                      null;
-                                                  _joining =
-                                                      true;
-                                                },
-                                              );
+                                          : _permissionPermanentlyDenied
+                                              ? () => CallPermissions
+                                                  .openSettings()
+                                              : () {
+                                                  setState(
+                                                    () {
+                                                      _errorMessage =
+                                                          null;
+                                                      _joining =
+                                                          true;
+                                                    },
+                                                  );
 
-                                              WidgetsBinding
-                                                  .instance
-                                                  .addPostFrameCallback(
-                                                (_) {
-                                                  if (mounted &&
-                                                      !_leaving) {
-                                                    _ensureJoined();
-                                                  }
+                                                  WidgetsBinding
+                                                      .instance
+                                                      .addPostFrameCallback(
+                                                    (_) {
+                                                      if (mounted &&
+                                                          !_leaving) {
+                                                        _ensureJoined();
+                                                      }
+                                                    },
+                                                  );
                                                 },
-                                              );
-                                            },
-                                  child:
-                                      const Text(
-                                    'Try again',
+                                  child: Text(
+                                    _permissionPermanentlyDenied
+                                        ? 'Open settings'
+                                        : 'Try again',
                                   ),
                                 ),
                               ],
@@ -1126,8 +1203,7 @@ class _DailyCallScreenState
                       : Builder(
                           builder:
                               (context) {
-                            if (!_leaving &&
-                                !_minimizing) {
+                            if (!_leaving) {
                               _syncVideoTrack(
                                 session,
                               );
@@ -1149,7 +1225,6 @@ class _DailyCallScreenState
                                 // ------------------------------------------------
 
                                 if (!_leaving &&
-                                    !_minimizing &&
                                     session.client !=
                                         null)
                                   Positioned.fill(
@@ -1170,7 +1245,6 @@ class _DailyCallScreenState
                                 // ------------------------------------------------
 
                                 if (!_leaving &&
-                                    !_minimizing &&
                                     session.client !=
                                         null)
                                   Positioned(
@@ -1216,7 +1290,6 @@ class _DailyCallScreenState
                                 // ------------------------------------------------
 
                                 if (!_leaving &&
-                                    !_minimizing &&
                                     session.client !=
                                         null)
                                   Positioned(
@@ -1323,7 +1396,6 @@ class _DailyCallScreenState
                                 // ------------------------------------------------
 
                                 if (!_leaving &&
-                                    !_minimizing &&
                                     session
                                         .raisedHands
                                         .isNotEmpty)
