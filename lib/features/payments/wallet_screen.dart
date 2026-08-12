@@ -14,7 +14,7 @@ import '../../providers/payment_providers.dart';
 
 class WalletScreen extends ConsumerWidget {
   const WalletScreen({super.key});
-
+  
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final walletAsync = ref.watch(walletProvider);
@@ -23,7 +23,7 @@ class WalletScreen extends ConsumerWidget {
     final withdrawalsAsync = ref.watch(myWithdrawalsProvider);
     final isTeacher = ref.watch(authProvider).user?.role == 'teacher';
     final currency = NumberFormat.currency(symbol: '\$');
-
+    
     return Scaffold(
       appBar: AppBar(title: const Text('Wallet')),
       body: RefreshIndicator(
@@ -107,10 +107,10 @@ class WalletScreen extends ConsumerWidget {
                   );
                 }
                 final sorted = [...payments]..sort((a, b) {
-                    final aDate = a.createdAt ?? DateTime(2000);
-                    final bDate = b.createdAt ?? DateTime(2000);
-                    return bDate.compareTo(aDate);
-                  });
+                  final aDate = a.createdAt ?? DateTime(2000);
+                  final bDate = b.createdAt ?? DateTime(2000);
+                  return bDate.compareTo(aDate);
+                });
                 return Column(
                   children: sorted.map((p) => _PaymentTile(payment: p)).toList(),
                 );
@@ -133,10 +133,10 @@ class WalletScreen extends ConsumerWidget {
                   );
                 }
                 final sorted = [...topUps]..sort((a, b) {
-                    final aDate = a.createdAt ?? DateTime(2000);
-                    final bDate = b.createdAt ?? DateTime(2000);
-                    return bDate.compareTo(aDate);
-                  });
+                  final aDate = a.createdAt ?? DateTime(2000);
+                  final bDate = b.createdAt ?? DateTime(2000);
+                  return bDate.compareTo(aDate);
+                });
                 return Column(
                   children: sorted.map((t) => _TopUpTile(topUp: t)).toList(),
                 );
@@ -160,10 +160,10 @@ class WalletScreen extends ConsumerWidget {
                     );
                   }
                   final sorted = [...withdrawals]..sort((a, b) {
-                      final aDate = a.createdAt ?? DateTime(2000);
-                      final bDate = b.createdAt ?? DateTime(2000);
-                      return bDate.compareTo(aDate);
-                    });
+                    final aDate = a.createdAt ?? DateTime(2000);
+                    final bDate = b.createdAt ?? DateTime(2000);
+                    return bDate.compareTo(aDate);
+                  });
                   return Column(
                     children: sorted.map((w) => _WithdrawalTile(withdrawal: w)).toList(),
                   );
@@ -184,9 +184,9 @@ class WalletScreen extends ConsumerWidget {
 
 class _TopUpTile extends StatelessWidget {
   const _TopUpTile({required this.topUp});
-
+  
   final WalletTopUpRequest topUp;
-
+  
   Color get _statusColor {
     switch (topUp.status) {
       case 'approved':
@@ -197,7 +197,7 @@ class _TopUpTile extends StatelessWidget {
         return AppColors.accent;
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
     final formatter = DateFormat('MMM d, yyyy');
@@ -217,7 +217,7 @@ class _TopUpTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text('\$${topUp.amount.toStringAsFixed(2)}',
-                style: const TextStyle(fontWeight: FontWeight.w800)),
+            style: const TextStyle(fontWeight: FontWeight.w800)),
             StatusChip(label: topUp.status, color: _statusColor),
           ],
         ),
@@ -228,9 +228,9 @@ class _TopUpTile extends StatelessWidget {
 
 class _PaymentTile extends ConsumerWidget {
   const _PaymentTile({required this.payment});
-
+  
   final Payment payment;
-
+  
   Color get _statusColor {
     switch (payment.status) {
       case 'completed':
@@ -241,12 +241,12 @@ class _PaymentTile extends ConsumerWidget {
         return AppColors.accent;
     }
   }
-
+  
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final formatter = DateFormat('MMM d, yyyy');
     final courseAsync = ref.watch(courseDetailProvider(payment.courseId));
-
+    
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
@@ -259,16 +259,15 @@ class _PaymentTile extends ConsumerWidget {
         ),
         subtitle: Text(
           '${payment.paymentMethod.replaceAll('_', ' ')}'
-          '${payment.createdAt != null ? ' · ${formatter.format(payment.createdAt!)}' : ''}',
+        '${payment.createdAt != null ? ' · ${formatter.format(payment.createdAt!)}' : ''}',
         ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text('\$${payment.amount.toStringAsFixed(2)}',
-                style: const TextStyle(fontWeight: FontWeight.w800)),
-            StatusChip(label: payment.status, color: _statusColor),
-          ],
+            style: const TextStyle(fontWeight: FontWeight.w800)),
+            StatusChip(label: payment.status, color: _statusColor),],
         ),
       ),
     );
@@ -277,9 +276,9 @@ class _PaymentTile extends ConsumerWidget {
 
 class _WithdrawalTile extends StatelessWidget {
   const _WithdrawalTile({required this.withdrawal});
-
+  
   final WithdrawalRequest withdrawal;
-
+  
   Color get _statusColor {
     switch (withdrawal.status) {
       case 'approved':
@@ -290,7 +289,7 @@ class _WithdrawalTile extends StatelessWidget {
         return AppColors.accent;
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
     final formatter = DateFormat('MMM d, yyyy');
@@ -310,7 +309,7 @@ class _WithdrawalTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text('\$${withdrawal.amount.toStringAsFixed(2)}',
-                style: const TextStyle(fontWeight: FontWeight.w800)),
+            style: const TextStyle(fontWeight: FontWeight.w800)),
             StatusChip(label: withdrawal.status, color: _statusColor),
           ],
         ),
@@ -319,17 +318,13 @@ class _WithdrawalTile extends StatelessWidget {
   }
 }
 
-/// The dialog a teacher fills in to request a payout — amount and the
-/// mobile money number to receive it. The backend holds (deducts) the
-/// amount from their wallet the moment this is submitted, before any
-/// admin review — see WithdrawalRequestCreateView for why.
 /// The dialog behind the standalone "Top up" button — independent of
 /// any enrollment attempt, so a student (or teacher) can add funds to
 /// their wallet proactively at any time, not just when an enrollment
 /// fails for insufficient balance.
 class _TopUpDialog extends ConsumerStatefulWidget {
   const _TopUpDialog();
-
+  
   @override
   ConsumerState<_TopUpDialog> createState() => _TopUpDialogState();
 }
@@ -339,22 +334,24 @@ class _TopUpDialogState extends ConsumerState<_TopUpDialog> {
   final _amountController = TextEditingController();
   final _refController = TextEditingController();
   bool _submitting = false;
-
+  String _paymentMethod = 'mtn';
+  
   @override
   void dispose() {
     _amountController.dispose();
     _refController.dispose();
     super.dispose();
   }
-
-  Future<void> _submit(String momoNumber) async {
+  
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _submitting = true);
     try {
       await ref.read(paymentRepositoryProvider).submitTopUpRequest(
-            amount: double.parse(_amountController.text.trim()),
-            momoReference: _refController.text.trim(),
-          );
+        amount: double.parse(_amountController.text.trim()),
+        paymentMethod: _paymentMethod,
+        momoReference: _refController.text.trim(),
+      );
       ref.invalidate(myTopUpsProvider);
       if (mounted) {
         Navigator.of(context).pop();
@@ -371,12 +368,15 @@ class _TopUpDialogState extends ConsumerState<_TopUpDialog> {
       if (mounted) setState(() => _submitting = false);
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
     final walletAsync = ref.watch(walletProvider);
-    final momoNumber = walletAsync.asData?.value.momoWalletNumber ?? '';
-
+    final mtnNumber = walletAsync.asData?.value.momoWalletNumber ?? '';
+    final airtelNumber = walletAsync.asData?.value.airtelMerchantNumber ?? '';
+    final activeNumber = _paymentMethod == 'mtn' ? mtnNumber : airtelNumber;
+    final activeLabel = _paymentMethod == 'mtn' ? 'MTN Mobile Money' : 'Airtel Money';
+    
     return AlertDialog(
       title: const Text('Top up your wallet'),
       content: Form(
@@ -385,10 +385,21 @@ class _TopUpDialogState extends ConsumerState<_TopUpDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            const Text('Choose the network you sent from', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'mtn', label: Text('MTN')),
+                ButtonSegment(value: 'airtel', label: Text('Airtel')),
+              ],
+              selected: {_paymentMethod},
+              onSelectionChanged: (selected) => setState(() => _paymentMethod = selected.first),
+            ),
+            const SizedBox(height: 16),
             Text(
-              momoNumber.isEmpty
-                  ? 'Send money via mobile money, then enter the details below.'
-                  : 'Send money to $momoNumber via mobile money, then enter the details below.',
+              activeNumber.isEmpty
+              ? 'Send money via $activeLabel, then enter the details below.'
+            : 'Send money to $activeNumber via $activeLabel, then enter the details below.',
             ),
             const SizedBox(height: 16),
             AppTextField(
@@ -399,7 +410,7 @@ class _TopUpDialogState extends ConsumerState<_TopUpDialog> {
               validator: (v) {
                 final value = double.tryParse((v ?? '').trim());
                 if (value == null || value <= 0) return 'Enter a valid amount';
-                return null;
+            return null;
               },
             ),
             const SizedBox(height: 16),
@@ -409,7 +420,7 @@ class _TopUpDialogState extends ConsumerState<_TopUpDialog> {
               prefixIcon: Icons.receipt_long_outlined,
               validator: (v) {
                 if (v == null || v.trim().isEmpty) return 'Enter the payment reference';
-                return null;
+            return null;
               },
             ),
           ],
@@ -421,7 +432,7 @@ class _TopUpDialogState extends ConsumerState<_TopUpDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(
-          onPressed: _submitting ? null : () => _submit(momoNumber),
+          onPressed: _submitting ? null : _submit,
           child: Text(_submitting ? 'Submitting…' : 'Submit'),
         ),
       ],
@@ -431,7 +442,7 @@ class _TopUpDialogState extends ConsumerState<_TopUpDialog> {
 
 class _RequestWithdrawalDialog extends ConsumerStatefulWidget {
   const _RequestWithdrawalDialog();
-
+  
   @override
   ConsumerState<_RequestWithdrawalDialog> createState() => _RequestWithdrawalDialogState();
 }
@@ -441,22 +452,22 @@ class _RequestWithdrawalDialogState extends ConsumerState<_RequestWithdrawalDial
   final _amountController = TextEditingController();
   final _numberController = TextEditingController();
   bool _submitting = false;
-
+  
   @override
   void dispose() {
     _amountController.dispose();
     _numberController.dispose();
     super.dispose();
   }
-
+  
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _submitting = true);
     try {
       await ref.read(paymentRepositoryProvider).requestWithdrawal(
-            amount: double.parse(_amountController.text.trim()),
-            momoNumber: _numberController.text.trim(),
-          );
+        amount: double.parse(_amountController.text.trim()),
+        momoNumber: _numberController.text.trim(),
+      );
       ref.invalidate(walletProvider);
       ref.invalidate(myWithdrawalsProvider);
       if (mounted) {
@@ -478,7 +489,7 @@ class _RequestWithdrawalDialogState extends ConsumerState<_RequestWithdrawalDial
       if (mounted) setState(() => _submitting = false);
     }
   }
-
+  
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -496,7 +507,7 @@ class _RequestWithdrawalDialogState extends ConsumerState<_RequestWithdrawalDial
               validator: (v) {
                 final value = double.tryParse((v ?? '').trim());
                 if (value == null || value <= 0) return 'Enter a valid amount';
-                return null;
+            return null;
               },
             ),
             const SizedBox(height: 16),
@@ -507,7 +518,7 @@ class _RequestWithdrawalDialogState extends ConsumerState<_RequestWithdrawalDial
               prefixIcon: Icons.phone_outlined,
               validator: (v) {
                 if (v == null || v.trim().isEmpty) return 'Enter the number to receive payment';
-                return null;
+            return null;
               },
             ),
           ],
