@@ -15,18 +15,17 @@ import 'camera_off_placeholder.dart';
 
 /// Full-screen, in-app Daily.co call for a live class.
 ///
-/// The CallClient lives inside DailyCallSession so minimizing this screen
-/// does not terminate the call. Re-opening the screen attaches to the
-/// existing session.
+/// IMPORTANT LIFECYCLE RULES:
 ///
-/// Important lifecycle rules:
-/// 1. Daily startup happens after the first Flutter frame.
-/// 2. Only one startup operation can run at a time.
-/// 3. Leaving waits for Daily to finish before popping the route.
-/// 4. Android/system back uses the same leave path.
-/// 5. Once leaving starts, this screen stops touching Daily controllers.
-/// 6. This screen NEVER directly disposes the Daily CallClient.
-/// 7. The DailyCallSession owns the native Daily lifecycle.
+/// 1. DailyCallSession owns the native Daily CallClient.
+/// 2. This screen NEVER calls CallClient.dispose().
+/// 3. Minimizing removes only this Flutter route.
+/// 4. Minimizing NEVER calls Daily leave().
+/// 5. Full-screen hang-up calls DailyCallSession.leave().
+/// 6. The screen waits for session.leave() before popping.
+/// 7. PopScope must not interpret a minimize pop as a hang-up.
+/// 8. Once leaving starts, this screen stops touching Daily tracks.
+/// 9. The bubble and this screen use the same DailyCallSession.
 class DailyCallScreen extends ConsumerStatefulWidget {
   const DailyCallScreen({
     super.key,
@@ -51,17 +50,25 @@ class _DailyCallScreenState
   bool _leaving = false;
   bool _starting = false;
 
+  // IMPORTANT:
+  // This is separate from _leaving.
+  //
+  // When true, the route is being popped ONLY because the user
+  // pressed minimize. PopScope must NOT call Daily leave().
+  bool _minimizing = false;
+
   String? _errorMessage;
 
-  final _videoController = VideoViewController();
+  final VideoViewController _videoController =
+      VideoViewController();
 
   MediaStreamTrack? _lastTrack;
 
-  final Map<String, VideoViewController> _remoteControllers =
-      {};
+  final Map<String, VideoViewController>
+      _remoteControllers = {};
 
-  final Map<String, MediaStreamTrack?> _remoteLastTracks =
-      {};
+  final Map<String, MediaStreamTrack?>
+      _remoteLastTracks = {};
 
   String? _pinnedRemoteId;
 
@@ -73,28 +80,35 @@ class _DailyCallScreenState
 
     // Do not initialize Daily while the native Flutter route/view
     // hierarchy is still being created.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_leaving) {
-        _ensureJoined();
-      }
-    });
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) {
+        if (mounted && !_leaving) {
+          _ensureJoined();
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
     // IMPORTANT:
+    //
     // The Daily CallClient belongs to DailyCallSession.
     //
-    // We only dispose the VideoView controllers owned by this screen.
-    // The provider has already completed Daily leave() before this route
-    // is normally popped.
+    // We only dispose VideoView controllers owned by this screen.
+    // We NEVER call:
+    //
+    // ref.read(dailyCallSessionProvider).client?.dispose()
+    //
+    // from here.
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.edgeToEdge,
     );
 
     _videoController.dispose();
 
-    for (final controller in _remoteControllers.values) {
+    for (final controller
+        in _remoteControllers.values) {
       controller.dispose();
     }
 
@@ -125,7 +139,7 @@ class _DailyCallScreenState
   }
 
   void _toggleFullscreen() {
-    if (_leaving) {
+    if (_leaving || _minimizing) {
       return;
     }
 
@@ -145,7 +159,10 @@ class _DailyCallScreenState
   // ---------------------------------------------------------------------------
 
   Future<void> _ensureJoined() async {
-    if (_starting || _leaving || !mounted) {
+    if (_starting ||
+        _leaving ||
+        _minimizing ||
+        !mounted) {
       return;
     }
 
@@ -155,10 +172,13 @@ class _DailyCallScreenState
       final session =
           ref.read(dailyCallSessionProvider);
 
-      // If the call is already active, this screen only needs to
-      // display it. Do NOT create another CallClient.
+      // If the call is already active, this screen only needs
+      // to display it.
+      //
+      // DO NOT create another CallClient.
       if (session.hasActiveCall &&
-          session.liveClassId == widget.liveClassId) {
+          session.liveClassId ==
+              widget.liveClassId) {
         if (mounted && !_leaving) {
           setState(() {
             _joining = false;
@@ -184,9 +204,12 @@ class _DailyCallScreenState
           ref.read(authProvider).user;
 
       await session.start(
-        liveClassId: widget.liveClassId,
-        liveClassTitle: widget.liveClassTitle,
-        credentials: widget.credentials!,
+        liveClassId:
+            widget.liveClassId,
+        liveClassTitle:
+            widget.liveClassTitle,
+        credentials:
+            widget.credentials!,
         currentUserId: user?.id,
       );
 
@@ -221,20 +244,18 @@ class _DailyCallScreenState
   // ---------------------------------------------------------------------------
 
   Future<void> _leave() async {
-    // This prevents:
+    // Prevent:
     //
-    // Main hang-up button
-    //        +
-    // Android back
-    //        +
+    // Main hang-up
+    // +
+    // Android/system back
+    // +
     // bubble hang-up
     //
-    // from starting multiple route teardown operations.
-    if (_leaving) {
-      return;
-    }
-
-    if (!mounted) {
+    // from starting multiple route operations.
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
       return;
     }
 
@@ -242,26 +263,24 @@ class _DailyCallScreenState
       _leaving = true;
     });
 
-    // Make sure immersive mode is removed while the route is still alive.
+    // Exit immersive mode while the route is still alive.
     _exitImmersive();
 
     final session =
-        ref.read(dailyCallSessionProvider);
+        ref.read(
+      dailyCallSessionProvider,
+    );
 
     try {
-      // IMPORTANT:
+      // The provider owns the native Daily lifecycle.
       //
-      // Do NOT dispose the Daily client here.
+      // This call must be awaited.
       //
-      // DailyCallSession owns:
-      //   leave()
-      //   dispose()
-      //   event subscriptions
-      //   timers
-      //   CallClient
+      // The screen must NOT directly call:
       //
-      // We wait until the provider has completely finished its native
-      // teardown BEFORE popping this route.
+      // session.client?.leave()
+      // session.client?.dispose()
+      //
       await session.leave();
     } catch (e, stackTrace) {
       debugPrint(
@@ -277,7 +296,8 @@ class _DailyCallScreenState
       return;
     }
 
-    // Only now remove the Flutter route.
+    // Only pop after the Daily session has finished
+    // its native cleanup.
     Navigator.of(context).pop();
   }
 
@@ -286,26 +306,37 @@ class _DailyCallScreenState
   // ---------------------------------------------------------------------------
 
   void _minimize() {
-    if (_leaving || !mounted) {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
       return;
     }
 
     final session =
-        ref.read(dailyCallSessionProvider);
+        ref.read(
+      dailyCallSessionProvider,
+    );
 
     if (!session.hasActiveCall) {
       return;
     }
 
+    // Tell PopScope that the next pop is intentional
+    // and represents MINIMIZE, not LEAVE.
+    setState(() {
+      _minimizing = true;
+    });
+
+    // This ONLY changes provider UI state.
+    //
+    // It MUST NOT leave the Daily room.
     session.minimize();
 
-    // IMPORTANT:
-    // This only removes the full-screen route.
+    // Remove the full-screen route.
     //
-    // It does NOT call Daily leave().
-    //
-    // The CallClient remains alive inside DailyCallSession.
-    Navigator.of(context).maybePop();
+    // The Daily CallClient stays alive inside
+    // DailyCallSession.
+    Navigator.of(context).pop();
   }
 
   // ---------------------------------------------------------------------------
@@ -313,13 +344,17 @@ class _DailyCallScreenState
   // ---------------------------------------------------------------------------
 
   Future<void> _flipCamera() async {
-    if (_leaving || !mounted) {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
       return;
     }
 
     try {
       await ref
-          .read(dailyCallSessionProvider)
+          .read(
+            dailyCallSessionProvider,
+          )
           .flipCamera();
     } catch (e, stackTrace) {
       debugPrint(
@@ -331,7 +366,8 @@ class _DailyCallScreenState
       );
 
       if (mounted && !_leaving) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
           SnackBar(
             content: Text(
               'Could not switch camera: $e',
@@ -349,7 +385,9 @@ class _DailyCallScreenState
   void _syncVideoTrack(
     DailyCallSession session,
   ) {
-    if (_leaving) {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
       return;
     }
 
@@ -364,9 +402,11 @@ class _DailyCallScreenState
     if (track != _lastTrack) {
       _lastTrack = track;
 
-      // Do not update the controller after the screen starts leaving.
-      if (!_leaving) {
-        _videoController.setTrack(track);
+      if (!_leaving &&
+          !_minimizing) {
+        _videoController.setTrack(
+          track,
+        );
       }
     }
   }
@@ -374,36 +414,59 @@ class _DailyCallScreenState
   void _syncRemoteControllers(
     DailyCallSession session,
   ) {
-    if (_leaving) {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
       return;
     }
 
     final remote =
-        session.client?.participants.remote ?? {};
+        session.client
+                ?.participants
+                .remote ??
+            {};
 
     final currentIds = remote.keys
-        .map((id) => id.id)
+        .map(
+          (id) => id.id,
+        )
         .toSet();
 
-    // Remove controllers belonging to participants who have left.
-    final staleIds = _remoteControllers.keys
-        .where(
-          (id) => !currentIds.contains(id),
-        )
-        .toList();
+    // Remove controllers for participants
+    // who are no longer present.
+    final staleIds =
+        _remoteControllers.keys
+            .where(
+              (id) =>
+                  !currentIds.contains(id),
+            )
+            .toList();
 
     for (final id in staleIds) {
+      if (_leaving ||
+          _minimizing ||
+          !mounted) {
+        return;
+      }
+
       final controller =
-          _remoteControllers.remove(id);
+          _remoteControllers.remove(
+        id,
+      );
 
       _remoteLastTracks.remove(id);
 
+      // Dispose only this screen's controller.
       controller?.dispose();
     }
 
-    // Create/update controllers for active remote participants.
-    for (final entry in remote.entries) {
-      if (_leaving) {
+    // Create/update controllers for active
+    // remote participants.
+    for (final entry
+        in remote.entries) {
+      if (_leaving ||
+          _minimizing ||
+          !mounted) {
         return;
       }
 
@@ -418,10 +481,13 @@ class _DailyCallScreenState
         () => VideoViewController(),
       );
 
-      if (_remoteLastTracks[id] != track) {
+      if (_remoteLastTracks[id] !=
+          track) {
         _remoteLastTracks[id] = track;
 
-        if (!_leaving) {
+        if (!_leaving &&
+            !_minimizing &&
+            mounted) {
           controller.setTrack(track);
         }
       }
@@ -436,21 +502,27 @@ class _DailyCallScreenState
       _mainRemoteParticipant(
     DailyCallSession session,
   ) {
-    if (_leaving) {
+    if (_leaving ||
+        _minimizing) {
       return null;
     }
 
     final remote =
-        session.client?.participants.remote ?? {};
+        session.client
+                ?.participants
+                .remote ??
+            {};
 
     if (remote.isEmpty) {
       return null;
     }
 
     if (_pinnedRemoteId != null) {
-      final pinned = remote.entries.where(
+      final pinned =
+          remote.entries.where(
         (entry) =>
-            entry.key.id == _pinnedRemoteId,
+            entry.key.id ==
+            _pinnedRemoteId,
       );
 
       if (pinned.isNotEmpty) {
@@ -465,7 +537,8 @@ class _DailyCallScreenState
 
     // Students see the moderator by default.
     if (!session.isOwner) {
-      final moderator = remote.entries.where(
+      final moderator =
+          remote.entries.where(
         (entry) =>
             entry.value.info.isOwner,
       );
@@ -478,7 +551,7 @@ class _DailyCallScreenState
       }
     }
 
-    // Teacher's own video remains the default.
+    // Teacher's own video remains default.
     return null;
   }
 
@@ -490,7 +563,8 @@ class _DailyCallScreenState
     DailyCallSession session, {
     bool compact = false,
   }) {
-    if (_leaving) {
+    if (_leaving ||
+        _minimizing) {
       return const ColoredBox(
         color: Colors.black,
       );
@@ -502,13 +576,19 @@ class _DailyCallScreenState
 
     if (showVideo) {
       return VideoView(
-        controller: _videoController,
+        controller:
+            _videoController,
       );
     }
 
     return CameraOffPlaceholder(
       displayName:
-          ref.watch(authProvider).user?.displayName ??
+          ref
+                  .watch(
+                    authProvider,
+                  )
+                  .user
+                  ?.displayName ??
               'You',
       compact: compact,
     );
@@ -523,7 +603,8 @@ class _DailyCallScreenState
     Participant participant, {
     bool compact = false,
   }) {
-    if (_leaving) {
+    if (_leaving ||
+        _minimizing) {
       return const ColoredBox(
         color: Colors.black,
       );
@@ -544,9 +625,14 @@ class _DailyCallScreenState
 
     return CameraOffPlaceholder(
       displayName:
-          participant.info.username?.isNotEmpty ??
+          participant
+                      .info
+                      .username
+                      ?.isNotEmpty ??
                   false
-              ? participant.info.username!
+              ? participant
+                  .info
+                  .username!
               : 'Participant',
       compact: compact,
     );
@@ -560,19 +646,25 @@ class _DailyCallScreenState
     DailyCallSession session,
     String? mainRemoteId,
   ) {
-    if (_leaving) {
+    if (_leaving ||
+        _minimizing) {
       return const SizedBox.shrink();
     }
 
     final remote =
-        session.client?.participants.remote ?? {};
+        session.client
+                ?.participants
+                .remote ??
+            {};
 
-    final others = remote.entries
-        .where(
-          (entry) =>
-              entry.key.id != mainRemoteId,
-        )
-        .toList();
+    final others =
+        remote.entries
+            .where(
+              (entry) =>
+                  entry.key.id !=
+                  mainRemoteId,
+            )
+            .toList();
 
     final showLocalTile =
         mainRemoteId != null;
@@ -594,30 +686,39 @@ class _DailyCallScreenState
         children: [
           if (showLocalTile)
             _thumbnailTile(
-              child: _localVideoTile(
+              child:
+                  _localVideoTile(
                 session,
                 compact: true,
               ),
-              muted: !session.micEnabled,
+              muted:
+                  !session.micEnabled,
               onTap: () {
-                if (!_leaving && mounted) {
+                if (!_leaving &&
+                    !_minimizing &&
+                    mounted) {
                   setState(() {
-                    _pinnedRemoteId = null;
+                    _pinnedRemoteId =
+                        null;
                   });
                 }
               },
             ),
           ...others.map(
-            (entry) => _thumbnailTile(
-              child: _remoteVideoTile(
+            (entry) =>
+                _thumbnailTile(
+              child:
+                  _remoteVideoTile(
                 entry.key.id,
                 entry.value,
                 compact: true,
               ),
-              muted:
-                  entry.value.isMicrophoneMuted,
+              muted: entry.value
+                  .isMicrophoneMuted,
               onTap: () {
-                if (!_leaving && mounted) {
+                if (!_leaving &&
+                    !_minimizing &&
+                    mounted) {
                   setState(() {
                     _pinnedRemoteId =
                         entry.key.id;
@@ -638,13 +739,20 @@ class _DailyCallScreenState
   }) {
     return Padding(
       padding:
-          const EdgeInsets.only(right: 10),
+          const EdgeInsets.only(
+        right: 10,
+      ),
       child: GestureDetector(
         onTap:
-            _leaving ? null : onTap,
+            _leaving ||
+                    _minimizing
+                ? null
+                : onTap,
         child: ClipRRect(
           borderRadius:
-              BorderRadius.circular(10),
+              BorderRadius.circular(
+            10,
+          ),
           child: SizedBox(
             width: 68,
             height: 90,
@@ -662,7 +770,8 @@ class _DailyCallScreenState
                     child: Icon(
                       Icons
                           .mic_off_rounded,
-                      color: Colors.white,
+                      color:
+                          Colors.white,
                       size: 16,
                     ),
                   ),
@@ -679,7 +788,9 @@ class _DailyCallScreenState
   // ---------------------------------------------------------------------------
 
   void _openAppChat() {
-    if (_leaving || !mounted) {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
       return;
     }
 
@@ -701,7 +812,9 @@ class _DailyCallScreenState
   // ---------------------------------------------------------------------------
 
   void _openParticipants() {
-    if (_leaving || !mounted) {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
       return;
     }
 
@@ -712,14 +825,17 @@ class _DailyCallScreenState
       builder: (_) => Consumer(
         builder:
             (context, ref, __) {
-          final session = ref.watch(
+          final session =
+              ref.watch(
             dailyCallSessionProvider,
           );
 
           return ListView(
             shrinkWrap: true,
             padding:
-                const EdgeInsets.all(16),
+                const EdgeInsets.all(
+              16,
+            ),
             children: [
               Padding(
                 padding:
@@ -739,11 +855,13 @@ class _DailyCallScreenState
                       ),
                     ),
                     if (session.isOwner &&
-                        session.participants
+                        session
+                            .participants
                             .isNotEmpty)
                       TextButton.icon(
                         onPressed: () {
-                          if (!_leaving) {
+                          if (!_leaving &&
+                              !_minimizing) {
                             session
                                 .toggleMuteAll();
                           }
@@ -765,7 +883,8 @@ class _DailyCallScreenState
                   ],
                 ),
               ),
-              ...session.participants
+              ...session
+                  .participants
                   .entries
                   .map(
                 (entry) => ListTile(
@@ -787,7 +906,8 @@ class _DailyCallScreenState
                               tooltip:
                                   'Mute',
                               onPressed:
-                                  _leaving
+                                  _leaving ||
+                                          _minimizing
                                       ? null
                                       : () =>
                                           session
@@ -819,20 +939,35 @@ class _DailyCallScreenState
     );
 
     return PopScope(
-      // Never allow Flutter to pop this route automatically.
+      // Never let Flutter automatically pop this route.
       //
-      // We first perform Daily native cleanup and then pop manually.
+      // We explicitly pop after Daily cleanup for a real hang-up.
       canPop: false,
+
       onPopInvokedWithResult:
           (didPop, result) {
-        if (didPop || _leaving) {
+        // IMPORTANT:
+        //
+        // _minimizing means this pop was intentionally
+        // caused by the minimize button.
+        //
+        // Therefore NEVER call Daily leave here.
+        if (_minimizing) {
+          return;
+        }
+
+        if (didPop ||
+            _leaving) {
           return;
         }
 
         _leave();
       },
+
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor:
+            Colors.black,
+
         body: SafeArea(
           child: _joining
               ? Stack(
@@ -840,9 +975,11 @@ class _DailyCallScreenState
                     const Center(
                       child:
                           CircularProgressIndicator(
-                        color: Colors.white,
+                        color:
+                            Colors.white,
                       ),
                     ),
+
                     Positioned(
                       top: 8,
                       left: 8,
@@ -853,7 +990,8 @@ class _DailyCallScreenState
                                 ? null
                                 : _leave,
                         style:
-                            TextButton.styleFrom(
+                            TextButton
+                                .styleFrom(
                           foregroundColor:
                               Colors.white70,
                         ),
@@ -877,8 +1015,11 @@ class _DailyCallScreenState
                           Padding(
                         padding:
                             const EdgeInsets
-                                .all(24),
-                        child: Column(
+                                .all(
+                          24,
+                        ),
+                        child:
+                            Column(
                           mainAxisSize:
                               MainAxisSize
                                   .min,
@@ -890,9 +1031,11 @@ class _DailyCallScreenState
                                   Colors.white54,
                               size: 48,
                             ),
+
                             const SizedBox(
                               height: 16,
                             ),
+
                             Text(
                               _errorMessage!,
                               style:
@@ -904,9 +1047,11 @@ class _DailyCallScreenState
                                   TextAlign
                                       .center,
                             ),
+
                             const SizedBox(
                               height: 24,
                             ),
+
                             Row(
                               mainAxisSize:
                                   MainAxisSize
@@ -919,13 +1064,11 @@ class _DailyCallScreenState
                                       OutlinedButton
                                           .styleFrom(
                                     foregroundColor:
-                                        Colors
-                                            .white,
+                                        Colors.white,
                                     side:
                                         const BorderSide(
                                       color:
-                                          Colors
-                                              .white54,
+                                          Colors.white54,
                                     ),
                                   ),
                                   child:
@@ -933,9 +1076,11 @@ class _DailyCallScreenState
                                     'Close',
                                   ),
                                 ),
+
                                 const SizedBox(
                                   width: 12,
                                 ),
+
                                 FilledButton(
                                   onPressed:
                                       _starting ||
@@ -975,14 +1120,14 @@ class _DailyCallScreenState
                     )
                   : _leaving
                       ? const ColoredBox(
-                          color: Colors.black,
+                          color:
+                              Colors.black,
                         )
                       : Builder(
                           builder:
                               (context) {
-                            // Do not touch Daily controllers once
-                            // teardown has started.
-                            if (!_leaving) {
+                            if (!_leaving &&
+                                !_minimizing) {
                               _syncVideoTrack(
                                 session,
                               );
@@ -999,24 +1144,33 @@ class _DailyCallScreenState
 
                             return Stack(
                               children: [
-                                // Main video.
+                                // ------------------------------------------------
+                                // MAIN VIDEO
+                                // ------------------------------------------------
+
                                 if (!_leaving &&
+                                    !_minimizing &&
                                     session.client !=
                                         null)
                                   Positioned.fill(
-                                    child: mainRemote !=
-                                            null
-                                        ? _remoteVideoTile(
-                                            mainRemote.key,
-                                            mainRemote.value,
-                                          )
-                                        : _localVideoTile(
-                                            session,
-                                          ),
+                                    child:
+                                        mainRemote !=
+                                                null
+                                            ? _remoteVideoTile(
+                                                mainRemote.key,
+                                                mainRemote.value,
+                                              )
+                                            : _localVideoTile(
+                                                session,
+                                              ),
                                   ),
 
-                                // Microphone status.
+                                // ------------------------------------------------
+                                // MICROPHONE STATUS
+                                // ------------------------------------------------
+
                                 if (!_leaving &&
+                                    !_minimizing &&
                                     session.client !=
                                         null)
                                   Positioned(
@@ -1049,15 +1203,20 @@ class _DailyCallScreenState
                                                   .mic_off_rounded,
                                               color:
                                                   Colors.white,
-                                              size: 16,
+                                              size:
+                                                  16,
                                             ),
                                           ),
                                       ],
                                     ),
                                   ),
 
-                                // Thumbnails.
+                                // ------------------------------------------------
+                                // THUMBNAILS
+                                // ------------------------------------------------
+
                                 if (!_leaving &&
+                                    !_minimizing &&
                                     session.client !=
                                         null)
                                   Positioned(
@@ -1072,7 +1231,10 @@ class _DailyCallScreenState
                                     ),
                                   ),
 
-                                // Top bar.
+                                // ------------------------------------------------
+                                // TOP BAR
+                                // ------------------------------------------------
+
                                 Positioned(
                                   top: 12,
                                   left: 16,
@@ -1090,10 +1252,12 @@ class _DailyCallScreenState
                                         tooltip:
                                             'Minimize',
                                         onPressed:
-                                            _leaving
+                                            _leaving ||
+                                                    _minimizing
                                                 ? null
                                                 : _minimize,
                                       ),
+
                                       Expanded(
                                         child:
                                             Text(
@@ -1104,14 +1268,14 @@ class _DailyCallScreenState
                                             color:
                                                 Colors.white,
                                             fontWeight:
-                                                FontWeight
-                                                    .w700,
+                                                FontWeight.w700,
                                           ),
                                           overflow:
                                               TextOverflow
                                                   .ellipsis,
                                         ),
                                       ),
+
                                       IconButton(
                                         icon:
                                             Icon(
@@ -1128,10 +1292,12 @@ class _DailyCallScreenState
                                                 ? 'Exit fullscreen'
                                                 : 'Fullscreen',
                                         onPressed:
-                                            _leaving
+                                            _leaving ||
+                                                    _minimizing
                                                 ? null
                                                 : _toggleFullscreen,
                                       ),
+
                                       if (session
                                           .isOwner)
                                         IconButton(
@@ -1143,7 +1309,8 @@ class _DailyCallScreenState
                                                 Colors.white,
                                           ),
                                           onPressed:
-                                              _leaving
+                                              _leaving ||
+                                                      _minimizing
                                                   ? null
                                                   : _openParticipants,
                                         ),
@@ -1151,8 +1318,12 @@ class _DailyCallScreenState
                                   ),
                                 ),
 
-                                // Raised hands.
+                                // ------------------------------------------------
+                                // RAISED HANDS
+                                // ------------------------------------------------
+
                                 if (!_leaving &&
+                                    !_minimizing &&
                                     session
                                         .raisedHands
                                         .isNotEmpty)
@@ -1172,8 +1343,7 @@ class _DailyCallScreenState
                                         (entry) =>
                                             Chip(
                                           backgroundColor:
-                                              AppColors
-                                                  .accent,
+                                              AppColors.accent,
                                           label:
                                               Text(
                                             entry.userName,
@@ -1196,7 +1366,8 @@ class _DailyCallScreenState
                                           ),
                                           onDeleted:
                                               session.isOwner &&
-                                                      !_leaving
+                                                      !_leaving &&
+                                                      !_minimizing
                                                   ? () =>
                                                       session.lowerHand(
                                                         entry.userId,
@@ -1219,7 +1390,10 @@ class _DailyCallScreenState
                                     ),
                                   ),
 
-                                // Chat.
+                                // ------------------------------------------------
+                                // CHAT
+                                // ------------------------------------------------
+
                                 Positioned(
                                   right: 16,
                                   bottom: 100,
@@ -1228,10 +1402,10 @@ class _DailyCallScreenState
                                     heroTag:
                                         'live-class-chat-fab',
                                     backgroundColor:
-                                        AppColors
-                                            .primary,
+                                        AppColors.primary,
                                     onPressed:
-                                        _leaving
+                                        _leaving ||
+                                                _minimizing
                                             ? null
                                             : _openAppChat,
                                     child:
@@ -1244,7 +1418,10 @@ class _DailyCallScreenState
                                   ),
                                 ),
 
-                                // Bottom controls.
+                                // ------------------------------------------------
+                                // BOTTOM CONTROLS
+                                // ------------------------------------------------
+
                                 Positioned(
                                   left: 0,
                                   right: 0,
@@ -1262,14 +1439,17 @@ class _DailyCallScreenState
                                             : Icons
                                                 .mic_off_rounded,
                                         onPressed:
-                                            _leaving
+                                            _leaving ||
+                                                    _minimizing
                                                 ? null
                                                 : () =>
                                                     session.toggleMic(),
                                       ),
+
                                       const SizedBox(
                                         width: 16,
                                       ),
+
                                       _CallControlButton(
                                         icon: session
                                                 .cameraEnabled
@@ -1278,41 +1458,53 @@ class _DailyCallScreenState
                                             : Icons
                                                 .videocam_off_rounded,
                                         onPressed:
-                                            _leaving
+                                            _leaving ||
+                                                    _minimizing
                                                 ? null
                                                 : () =>
                                                     session.toggleCamera(),
                                       ),
+
                                       const SizedBox(
                                         width: 16,
                                       ),
+
                                       _CallControlButton(
                                         icon: Icons
                                             .cameraswitch_rounded,
                                         onPressed:
-                                            _leaving
+                                            _leaving ||
+                                                    _minimizing
                                                 ? null
                                                 : _flipCamera,
                                       ),
+
                                       const SizedBox(
                                         width: 16,
                                       ),
+
+                                      // ------------------------------------------------
+                                      // HANG UP
+                                      // ------------------------------------------------
+
                                       _CallControlButton(
                                         icon: Icons
                                             .call_end_rounded,
                                         color:
-                                            AppColors
-                                                .error,
+                                            AppColors.error,
                                         onPressed:
-                                            _leaving
+                                            _leaving ||
+                                                    _minimizing
                                                 ? null
                                                 : _leave,
                                       ),
+
                                       if (!session
                                           .isOwner) ...[
                                         const SizedBox(
                                           width: 16,
                                         ),
+
                                         _CallControlButton(
                                           icon: Icons
                                               .back_hand_rounded,
@@ -1322,7 +1514,8 @@ class _DailyCallScreenState
                                                   .accent
                                               : null,
                                           onPressed:
-                                              _leaving
+                                              _leaving ||
+                                                      _minimizing
                                                   ? null
                                                   : () =>
                                                       session.toggleMyHand(),
@@ -1389,9 +1582,9 @@ class _LiveClassChatSheet
   final String liveClassId;
 
   @override
-  ConsumerState<_LiveClassChatSheet>
-      createState() =>
-          _LiveClassChatSheetState();
+  ConsumerState<
+      _LiveClassChatSheet> createState() =>
+      _LiveClassChatSheetState();
 }
 
 class _LiveClassChatSheetState
@@ -1419,9 +1612,12 @@ class _LiveClassChatSheetState
     }
 
     controller.animateTo(
-      controller.position.maxScrollExtent,
+      controller.position
+          .maxScrollExtent,
       duration:
-          const Duration(milliseconds: 250),
+          const Duration(
+        milliseconds: 250,
+      ),
       curve: Curves.easeOut,
     );
   }
@@ -1530,15 +1726,19 @@ class _LiveClassChatSheetState
       maxChildSize: 0.95,
       expand: false,
       builder:
-          (context, scrollController) {
+          (
+        context,
+        scrollController,
+      ) {
         _chatScrollController =
             scrollController;
 
         return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context)
-                .viewInsets
-                .bottom,
+          padding:
+              EdgeInsets.only(
+            bottom: MediaQuery.of(
+              context,
+            ).viewInsets.bottom,
           ),
           child: Container(
             decoration:
@@ -1547,7 +1747,9 @@ class _LiveClassChatSheetState
                   AppColors.cardLight,
               borderRadius:
                   BorderRadius.vertical(
-                top: Radius.circular(20),
+                top: Radius.circular(
+                  20,
+                ),
               ),
             ),
             child: Column(
@@ -1555,6 +1757,7 @@ class _LiveClassChatSheetState
                 const SizedBox(
                   height: 10,
                 ),
+
                 Container(
                   width: 40,
                   height: 4,
@@ -1563,10 +1766,12 @@ class _LiveClassChatSheetState
                     color:
                         AppColors.border,
                     borderRadius:
-                        BorderRadius
-                            .circular(2),
+                        BorderRadius.circular(
+                      2,
+                    ),
                   ),
                 ),
+
                 const Padding(
                   padding:
                       EdgeInsets.all(12),
@@ -1579,6 +1784,7 @@ class _LiveClassChatSheetState
                     ),
                   ),
                 ),
+
                 Expanded(
                   child: chatAsync.when(
                     data: (messages) {
@@ -1607,7 +1813,10 @@ class _LiveClassChatSheetState
                         itemCount:
                             messages.length,
                         itemBuilder:
-                            (context, index) {
+                            (
+                          context,
+                          index,
+                        ) {
                           final msg =
                               messages[index];
 
@@ -1616,11 +1825,12 @@ class _LiveClassChatSheetState
                                   user?.id;
 
                           return Align(
-                            alignment: isMine
-                                ? Alignment
-                                    .centerRight
-                                : Alignment
-                                    .centerLeft,
+                            alignment:
+                                isMine
+                                    ? Alignment
+                                        .centerRight
+                                    : Alignment
+                                        .centerLeft,
                             child:
                                 Container(
                               margin:
@@ -1668,19 +1878,25 @@ class _LiveClassChatSheetState
                       child:
                           CircularProgressIndicator(),
                     ),
-                    error: (e, __) =>
+                    error: (
+                      e,
+                      __,
+                    ) =>
                         Center(
-                      child:
-                          Text('$e'),
+                      child: Text(
+                        '$e',
+                      ),
                     ),
                   ),
                 ),
+
                 SafeArea(
                   top: false,
                   child: Padding(
                     padding:
-                        const EdgeInsets
-                            .all(12),
+                        const EdgeInsets.all(
+                      12,
+                    ),
                     child: Row(
                       children: [
                         Expanded(
@@ -1698,9 +1914,11 @@ class _LiveClassChatSheetState
                                     _send(),
                           ),
                         ),
+
                         const SizedBox(
                           width: 8,
                         ),
+
                         IconButton.filled(
                           onPressed:
                               _sending
