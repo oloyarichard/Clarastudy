@@ -1,5 +1,5 @@
-name: Claralstudy
-description: Claralstudy Live Tutoring App - Flutter Frontend (Riverpod + go_router edition)
+name: Clarastudy
+description: Clarastudy Live Tutoring App - Flutter Frontend (Riverpod + go_router edition)
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -31,6 +31,7 @@ dependencies:
 
   # Live video (Daily.co, embedded in-app)
   daily_flutter: ^0.38.0
+  permission_handler: ^11.3.1
 
   # UI
   google_fonts: ^6.2.1
