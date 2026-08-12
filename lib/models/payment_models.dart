@@ -11,7 +11,7 @@ class Payment {
     this.transactionId,
     this.createdAt,
   });
-  
+
   final String id;
   final String userId;
   final String courseId;
@@ -20,7 +20,7 @@ class Payment {
   final String status; // pending | completed | failed
   final String? transactionId;
   final DateTime? createdAt;
-  
+
   factory Payment.fromJson(Map<String, dynamic> json) {
     return Payment(
       id: parseString(json['id']),
@@ -43,13 +43,13 @@ class Wallet {
     this.momoWalletNumber,
     this.airtelMerchantNumber,
   });
-  
+
   final String id;
   final String userId;
   final double balance;
   final String? momoWalletNumber;
   final String? airtelMerchantNumber;
-  
+
   factory Wallet.fromJson(Map<String, dynamic> json) {
     return Wallet(
       id: parseString(json['id']),
@@ -71,7 +71,7 @@ class WalletTopUpRequest {
     this.status = 'pending',
     this.createdAt,
   });
-  
+
   final String id;
   final String userId;
   final double amount;
@@ -79,7 +79,7 @@ class WalletTopUpRequest {
   final String momoReference;
   final String status; // pending | approved | rejected
   final DateTime? createdAt;
-  
+
   factory WalletTopUpRequest.fromJson(Map<String, dynamic> json) {
     return WalletTopUpRequest(
       id: parseString(json['id']),
@@ -102,14 +102,14 @@ class WithdrawalRequest {
     this.status = 'pending',
     this.createdAt,
   });
-  
+
   final String id;
   final String teacherId;
   final double amount;
   final String momoNumber;
   final String status; // pending | approved | rejected
   final DateTime? createdAt;
-  
+
   factory WithdrawalRequest.fromJson(Map<String, dynamic> json) {
     return WithdrawalRequest(
       id: parseString(json['id']),
@@ -120,3 +120,4 @@ class WithdrawalRequest {
       createdAt: parseDate(json['created_at']),
     );
   }
+}
