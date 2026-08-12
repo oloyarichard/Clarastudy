@@ -72,7 +72,11 @@ class DailyCallSession extends ChangeNotifier {
     myHandRaised = false;
     _currentUserId = currentUserId;
     notifyListeners();
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> a556cf4b70869bc0f07496946d911448be8e14f9
     // One automatic "warm" retry on top of the "cold" first attempt.
     // A first-ever join to a fresh room commonly hits transient network
     // negotiation delays (fresh DNS lookup, ICE/NAT traversal needing an
@@ -101,13 +105,21 @@ class DailyCallSession extends ChangeNotifier {
       }
     }
   }
+<<<<<<< HEAD
   
+=======
+
+>>>>>>> a556cf4b70869bc0f07496946d911448be8e14f9
   Future<void> _attemptJoin(DailyCallCredentials credentials, String? currentUserId) async {
     final newClient = await CallClient.create();
     client = newClient;
     
     _eventSubscription = newClient.events.listen((event) => _handleEvent(event, currentUserId));
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> a556cf4b70869bc0f07496946d911448be8e14f9
     await newClient.join(
       url: Uri.parse(credentials.roomUrl),
       token: credentials.token,
@@ -122,7 +134,11 @@ class DailyCallSession extends ChangeNotifier {
     _handsPollTimer = Timer.periodic(const Duration(seconds: 2), (_) => _pollRaisedHands());
     notifyListeners();
   }
+<<<<<<< HEAD
   
+=======
+
+>>>>>>> a556cf4b70869bc0f07496946d911448be8e14f9
   /// Cleans up a client left over from a failed join attempt, between
   /// retries. Deliberately lighter than _reset() — this keeps
   /// liveClassId/liveClassTitle/etc intact, since start() is still
@@ -134,7 +150,11 @@ class DailyCallSession extends ChangeNotifier {
     await client?.dispose();
     client = null;
   }
+<<<<<<< HEAD
   
+=======
+
+>>>>>>> a556cf4b70869bc0f07496946d911448be8e14f9
   Future<void> _pollRaisedHands() async {
     final id = liveClassId;
     if (id == null) return;
@@ -190,6 +210,7 @@ class DailyCallSession extends ChangeNotifier {
     event.maybeWhen(
       participantJoined: (participant) {
         final id = participant.info.userId ?? '';
+<<<<<<< HEAD
     final name = (participant.info.username?.isNotEmpty ?? false)
     ? participant.info.username!
     : 'Someone';
@@ -201,6 +222,19 @@ class DailyCallSession extends ChangeNotifier {
       SnackBar(content: Text('$name joined the class')),
     );
     }
+=======
+        final name = (participant.info.username?.isNotEmpty ?? false)
+            ? participant.info.username!
+            : 'Someone';
+        participants[id] = name;
+        notifyListeners();
+
+        final isSelf = currentUserId != null && id == currentUserId;
+        if (isOwner && !isSelf) {appScaffoldMessengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('$name joined the class')),
+          );
+        }
+>>>>>>> a556cf4b70869bc0f07496946d911448be8e14f9
       },
       participantLeft: (participant) {
         participants.remove(participant.info.userId ?? '');
@@ -371,7 +405,11 @@ class DailyCallSession extends ChangeNotifier {
     _handsPollTimer?.cancel();
     final clientToDispose = client;
     _reset();
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> a556cf4b70869bc0f07496946d911448be8e14f9
     await clientToDispose?.leave();
     await clientToDispose?.dispose();
   }

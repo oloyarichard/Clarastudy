@@ -53,7 +53,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final authState = ref.read(authProvider);
       final loc = state.matchedLocation;
       final isSplash = loc == '/splash';
-      final isAuthRoute = loc == '/login' || loc == '/register';
+      final isAuthRoute = loc == '/login' || loc == '/register' || loc == '/forgot-password';
 
       if (authState.status == AuthStatus.unknown) {
         return isSplash ? null : '/splash';

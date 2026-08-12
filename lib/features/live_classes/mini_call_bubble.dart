@@ -9,10 +9,7 @@ import 'camera_off_placeholder.dart';
 import 'daily_call_screen.dart';
 
 /// A small draggable floating bubble shown over the rest of the app
-/// whenever a call is active but minimized. Tapping it re-opens the
-/// full-screen call view (re-attaching to the same, still-running
-/// CallClient — no rejoin). This is inserted once, at the app root (see
-/// app.dart's MaterialApp.builder), so it floats over every screen.
+/// whenever a call is active but minimized.
 class MiniCallBubble extends ConsumerStatefulWidget {
   const MiniCallBubble({super.key});
 
@@ -22,10 +19,8 @@ class MiniCallBubble extends ConsumerStatefulWidget {
 
 class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
   Offset _offset = const Offset(16, 100);
+  bool _leaving = false;
 
-  // Confirmed API (pub.dev VideoViewController class docs, daily_flutter
-  // 0.38.0): create once, call setTrack() whenever the track changes,
-  // hand the controller itself to VideoView.
   final _videoController = VideoViewController();
   MediaStreamTrack? _lastTrack;
 
@@ -36,6 +31,7 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
   }
 
   void _syncVideoTrack(DailyCallSession session) {
+    if (_leaving) return;
     final track = session.client?.participants.local.media?.camera.track;
     if (track != _lastTrack) {
       _lastTrack = track;
@@ -43,10 +39,17 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
     }
   }
 
+  Future<void> _handleLeave(DailyCallSession session) async {
+    if (mounted) {
+      setState(() => _leaving = true);
+    }
+    await session.leave();
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(dailyCallSessionProvider);
-    if (!session.hasActiveCall || !session.isMinimized) {
+    if (!session.hasActiveCall || !session.isMinimized || _leaving) {
       return const SizedBox.shrink();
     }
 
@@ -101,7 +104,7 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
                   top: 4,
                   right: 4,
                   child: GestureDetector(
-                    onTap: () => session.leave(),
+                    onTap: () => _handleLeave(session),
                     child: const CircleAvatar(
                       radius: 12,
                       backgroundColor: AppColors.error,
