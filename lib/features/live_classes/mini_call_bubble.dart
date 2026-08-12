@@ -33,14 +33,14 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
   DailyCallSession? _session;
 
   @override
-  void initState() {
-    super.initState();
+void initState() {
+  super.initState();
 
-    // ref.read is safe here (unlike ref.watch, which needs build()).
-    _session = ref.read(dailyCallSessionProvider)
-      ..addTrackReleaseCallback(_releaseTrack);
-  }
-
+  // ref.read is safe here (unlike ref.watch, which needs build()).
+  final session = ref.read(dailyCallSessionProvider);
+  session.addTrackReleaseCallback(_releaseTrack);
+  _session = session;
+}
   @override
   void dispose() {
     _session?.removeTrackReleaseCallback(_releaseTrack);
