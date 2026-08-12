@@ -4,11 +4,22 @@ import 'package:daily_flutter/daily_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/utils/call_permissions.dart';
 import '../core/utils/global_keys.dart';
 import '../data/live_class_repository.dart';
 import '../models/live_class_models.dart';
 import 'core_providers.dart';
 
+/// Owns the one and only native Daily [CallClient] for the whole app.
+///
+/// Lifecycle rules (do not break these):
+///  * Runtime camera/mic permission is checked BEFORE CallClient.create().
+///  * Every VideoViewController that renders a Daily track must register a
+///    release callback here, so tracks are detached BEFORE native dispose().
+///    Disposing the native client while a renderer still holds a track is a
+///    use-after-free and takes the whole app down.
+///  * Native leave/dispose is time-boxed — a wedged native call must never
+///    wedge the Dart side.
 class DailyCallSession extends ChangeNotifier {
   DailyCallSession(this._repository);
 
@@ -40,7 +51,46 @@ class DailyCallSession extends ChangeNotifier {
   Timer? _handsPollTimer;
   String? _currentUserId;
 
+  bool _disposed = false;
+
+  /// Views register a callback that detaches their VideoViewControllers from
+  /// Daily tracks. Invoked immediately before the native client is destroyed.
+  final Set<VoidCallback> _trackReleaseCallbacks = <VoidCallback>{};
+
   bool get hasActiveCall => client != null;
+
+  /// True while the native client is being torn down. Views should stop
+  /// touching tracks entirely once this flips.
+  bool get isTearingDown => _leaveOperation != null;
+
+  void addTrackReleaseCallback(VoidCallback callback) {
+    _trackReleaseCallbacks.add(callback);
+  }
+
+  void removeTrackReleaseCallback(VoidCallback callback) {
+    _trackReleaseCallbacks.remove(callback);
+  }
+
+  void _releaseAllTracks() {
+    // Copy first — a callback may unregister itself while running.
+    for (final callback in _trackReleaseCallbacks.toList()) {
+      try {
+        callback();
+      } catch (e) {
+        debugPrint('Track release callback failed: $e');
+      }
+    }
+  }
+
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
+  }
+
+  // --------------------------------------------------------------------------
+  // START
+  // --------------------------------------------------------------------------
 
   Future<void> start({
     required String liveClassId,
@@ -48,8 +98,12 @@ class DailyCallSession extends ChangeNotifier {
     required DailyCallCredentials credentials,
     required String? currentUserId,
   }) async {
-    // If another leave is still shutting down the native client,
-    // wait for it completely.
+    // Permission FIRST. Daily does not ask on your behalf, and creating a
+    // client without camera/mic access is what kills the app on the very
+    // first call.
+    await CallPermissions.ensureGranted();
+
+    // If another leave is still shutting down the native client, wait it out.
     if (_leaveOperation != null) {
       await _leaveOperation;
     }
@@ -82,21 +136,12 @@ class DailyCallSession extends ChangeNotifier {
 
     const maxAttempts = 2;
 
-    for (
-      var attempt = 1;
-      attempt <= maxAttempts;
-      attempt++
-    ) {
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        await _attemptJoin(
-          credentials,
-          currentUserId,
-        );
-
+        await _attemptJoin(credentials, currentUserId);
         return;
       } catch (e) {
-        final isLastAttempt =
-            attempt == maxAttempts;
+        final isLastAttempt = attempt == maxAttempts;
 
         await _teardownFailedClient();
 
@@ -105,11 +150,7 @@ class DailyCallSession extends ChangeNotifier {
           rethrow;
         }
 
-        await Future.delayed(
-          const Duration(
-            milliseconds: 800,
-          ),
-        );
+        await Future<void>.delayed(const Duration(milliseconds: 800));
       }
     }
   }
@@ -118,50 +159,34 @@ class DailyCallSession extends ChangeNotifier {
     DailyCallCredentials credentials,
     String? currentUserId,
   ) async {
-    final newClient =
-        await CallClient.create();
+    final newClient = await CallClient.create();
 
     client = newClient;
 
-    _eventSubscription =
-        newClient.events.listen(
-      (event) {
-        _handleEvent(
-          event,
-          currentUserId,
-        );
-      },
+    _eventSubscription = newClient.events.listen(
+      (event) => _handleEvent(event, currentUserId),
     );
 
     await newClient.join(
-      url: Uri.parse(
-        credentials.roomUrl,
-      ),
+      url: Uri.parse(credentials.roomUrl),
       token: credentials.token,
     );
 
     await newClient.updateInputs(
-      inputs:
-          const InputSettingsUpdate.set(
-        camera:
-            CameraInputSettingsUpdate.set(
-          isEnabled:
-              BoolUpdate.set(true),
+      inputs: const InputSettingsUpdate.set(
+        camera: CameraInputSettingsUpdate.set(
+          isEnabled: BoolUpdate.set(true),
         ),
-        microphone:
-            MicrophoneInputSettingsUpdate
-                .set(
-          isEnabled:
-              BoolUpdate.set(true),
+        microphone: MicrophoneInputSettingsUpdate.set(
+          isEnabled: BoolUpdate.set(true),
         ),
       ),
     );
 
     _handsPollTimer?.cancel();
 
-    _handsPollTimer =
-        Timer.periodic(
-      const Duration(seconds: 2),
+    _handsPollTimer = Timer.periodic(
+      const Duration(seconds: 3),
       (_) => _pollRaisedHands(),
     );
 
@@ -170,7 +195,6 @@ class DailyCallSession extends ChangeNotifier {
 
   Future<void> _teardownFailedClient() async {
     await _eventSubscription?.cancel();
-
     _eventSubscription = null;
 
     _handsPollTimer?.cancel();
@@ -178,71 +202,78 @@ class DailyCallSession extends ChangeNotifier {
 
     final failedClient = client;
 
+    _releaseAllTracks();
+
     client = null;
 
     notifyListeners();
 
-    if (failedClient == null) {
-      return;
+    if (failedClient == null) return;
+
+    await _destroyClient(failedClient);
+  }
+
+  /// Native leave + dispose, each time-boxed so a hung native call can never
+  /// wedge the app. This is the difference between "hang up" and "hangs".
+  Future<void> _destroyClient(CallClient target) async {
+    try {
+      await target.leave().timeout(const Duration(seconds: 5));
+    } catch (e) {
+      debugPrint('Daily client leave error: $e');
     }
 
     try {
-      await failedClient.leave();
-    } catch (_) {}
-
-    try {
-      await failedClient.dispose();
-    } catch (_) {}
+      await target.dispose().timeout(const Duration(seconds: 5));
+    } catch (e) {
+      debugPrint('Daily client dispose error: $e');
+    }
   }
+
+  // --------------------------------------------------------------------------
+  // RAISED HANDS
+  // --------------------------------------------------------------------------
 
   Future<void> _pollRaisedHands() async {
     final id = liveClassId;
 
-    if (id == null || client == null) {
+    if (id == null || client == null || _leaveOperation != null) {
       return;
     }
 
     try {
-      final fresh =
-          await _repository.getRaisedHands(
-        id,
-      );
+      final fresh = await _repository.getRaisedHands(id);
 
-      final previousIds = raisedHands
-          .map((h) => h.userId)
-          .toSet();
+      if (client == null || _leaveOperation != null) return;
 
-      final newlyRaised =
-          fresh.where(
+      final previousIds = raisedHands.map((h) => h.userId).toSet();
+      final freshIds = fresh.map((h) => h.userId).toSet();
+
+      final newlyRaised = fresh.where(
         (h) =>
-            !previousIds.contains(
-              h.userId,
-            ) &&
-            h.userId != _currentUserId,
+            !previousIds.contains(h.userId) && h.userId != _currentUserId,
       );
 
-      for (final entry
-          in newlyRaised) {
-        appScaffoldMessengerKey
-            .currentState
-            ?.showSnackBar(
-          SnackBar(
-            content: Text(
-              '${entry.userName} raised their hand ✋',
-            ),
-          ),
+      for (final entry in newlyRaised) {
+        appScaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(content: Text('${entry.userName} raised their hand ✋')),
         );
       }
 
+      final nextMyHandRaised = fresh.any((h) => h.userId == _currentUserId);
+
+      // Only rebuild the UI when something actually changed. This poll used
+      // to notify every 2s, rebuilding the call screen and the bubble
+      // constantly — a real source of the switching jank.
+      final unchanged = previousIds.length == freshIds.length &&
+          previousIds.containsAll(freshIds) &&
+          myHandRaised == nextMyHandRaised;
+
       raisedHands = fresh;
+      myHandRaised = nextMyHandRaised;
 
-      myHandRaised = fresh.any(
-        (h) =>
-            h.userId ==
-            _currentUserId,
-      );
-
-      notifyListeners();
+      if (!unchanged) {
+        notifyListeners();
+      }
     } catch (_) {
       // Ignore one failed poll.
     }
@@ -251,341 +282,210 @@ class DailyCallSession extends ChangeNotifier {
   Future<void> toggleMyHand() async {
     final id = liveClassId;
 
-    if (id == null ||
-        client == null) {
-      return;
-    }
+    if (id == null || client == null || _leaveOperation != null) return;
 
     try {
-      myHandRaised =
-          await _repository
-              .toggleRaisedHand(id);
-
+      myHandRaised = await _repository.toggleRaisedHand(id);
       notifyListeners();
-
       await _pollRaisedHands();
     } catch (_) {}
   }
 
-  Future<void> lowerHand(
-    String userId,
-  ) async {
+  Future<void> lowerHand(String userId) async {
     final id = liveClassId;
 
-    if (id == null ||
-        !isOwner ||
-        client == null) {
+    if (id == null || !isOwner || client == null || _leaveOperation != null) {
       return;
     }
 
     try {
-      await _repository
-          .toggleRaisedHand(
-        id,
-        userId: userId,
-      );
-
+      await _repository.toggleRaisedHand(id, userId: userId);
       await _pollRaisedHands();
     } catch (_) {}
   }
 
-  void _handleEvent(
-    Event event,
-    String? currentUserId,
-  ) {
-    event.maybeWhen(
-      participantJoined:
-          (participant) {
-        final id =
-            participant.info.userId ??
-                '';
+  // --------------------------------------------------------------------------
+  // EVENTS
+  // --------------------------------------------------------------------------
 
-        final name =
-            (participant.info.username
-                        ?.isNotEmpty ??
-                    false)
-                ? participant
-                    .info
-                    .username!
-                : 'Someone';
+  void _handleEvent(Event event, String? currentUserId) {
+    // Once teardown starts, Daily callbacks must not touch our state.
+    if (_leaveOperation != null || _disposed) return;
+
+    event.maybeWhen(
+      participantJoined: (participant) {
+        final id = participant.info.userId ?? '';
+
+        final name = (participant.info.username?.isNotEmpty ?? false)
+            ? participant.info.username!
+            : 'Someone';
 
         participants[id] = name;
 
         notifyListeners();
 
-        final isSelf =
-            currentUserId != null &&
-            id == currentUserId;
+        final isSelf = currentUserId != null && id == currentUserId;
 
         if (isOwner && !isSelf) {
-          appScaffoldMessengerKey
-              .currentState
-              ?.showSnackBar(
-            SnackBar(
-              content: Text(
-                '$name joined the class',
-              ),
-            ),
+          appScaffoldMessengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('$name joined the class')),
           );
         }
       },
-
-      participantLeft:
-          (participant) {
-        participants.remove(
-          participant.info.userId ??
-              '',
-        );
-
+      participantLeft: (participant) {
+        participants.remove(participant.info.userId ?? '');
         notifyListeners();
       },
-
-      participantUpdated:
-          (participant) {
-        participants[
-                participant.info.userId ??
-                    ''] =
-            participant.info
-                    .username ??
-                '';
-
+      participantUpdated: (participant) {
+        participants[participant.info.userId ?? ''] =
+            participant.info.username ?? '';
         notifyListeners();
       },
-
-      callStateUpdated:
-          (stateData) {
-        if (stateData.state ==
-            CallState.left) {
-          // If leave() is already running,
-          // leave() itself owns cleanup.
-          //
-          // This prevents the Daily callback from
-          // racing with the explicit leave operation.
-          if (_leaveOperation ==
-              null) {
-            _reset();
+      callStateUpdated: (stateData) {
+        if (stateData.state == CallState.left) {
+          // The call ended from the outside (host ended the meeting, we were
+          // ejected, network gave up). The old code just nulled the client
+          // and LEAKED it — the native object stayed alive holding the
+          // camera, so the *next* CallClient.create() fought with a zombie.
+          // Tear it down properly instead.
+          if (_leaveOperation == null) {
+            unawaited(leave());
           }
         }
       },
-
-      inputsUpdated:
-          (inputs) {
-        micEnabled =
-            inputs.microphone
-                .isEnabled;
-
-        cameraEnabled =
-            inputs.camera
-                .isEnabled;
-
+      inputsUpdated: (inputs) {
+        micEnabled = inputs.microphone.isEnabled;
+        cameraEnabled = inputs.camera.isEnabled;
         notifyListeners();
       },
-
       orElse: () {},
     );
   }
 
-  // ------------------------------------------------------------
+  // --------------------------------------------------------------------------
   // MINIMIZE / MAXIMIZE
-  // ------------------------------------------------------------
+  // --------------------------------------------------------------------------
 
   void minimize() {
-    if (client == null) {
-      return;
-    }
-
+    if (client == null || isMinimized) return;
     isMinimized = true;
-
     notifyListeners();
   }
 
   void maximize() {
-    if (client == null) {
-      return;
-    }
-
+    if (client == null || !isMinimized) return;
     isMinimized = false;
-
     notifyListeners();
   }
 
-  // ------------------------------------------------------------
-  // MICROPHONE
-  // ------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // MICROPHONE / CAMERA
+  // --------------------------------------------------------------------------
 
   Future<void> toggleMic() async {
     final c = client;
+    if (c == null || _leaveOperation != null) return;
 
-    if (c == null ||
-        _leaveOperation != null) {
-      return;
-    }
-
-    final next =
-        !micEnabled;
+    final next = !micEnabled;
 
     try {
       await c.updateInputs(
-        inputs:
-            InputSettingsUpdate.set(
-          microphone:
-              MicrophoneInputSettingsUpdate
-                  .set(
-            isEnabled:
-                BoolUpdate.set(next),
+        inputs: InputSettingsUpdate.set(
+          microphone: MicrophoneInputSettingsUpdate.set(
+            isEnabled: BoolUpdate.set(next),
           ),
         ),
       );
 
       micEnabled = next;
-
       notifyListeners();
     } catch (_) {}
   }
 
-  // ------------------------------------------------------------
-  // CAMERA
-  // ------------------------------------------------------------
-
   Future<void> toggleCamera() async {
     final c = client;
+    if (c == null || _leaveOperation != null) return;
 
-    if (c == null ||
-        _leaveOperation != null) {
-      return;
-    }
-
-    final next =
-        !cameraEnabled;
+    final next = !cameraEnabled;
 
     try {
       await c.updateInputs(
-        inputs:
-            InputSettingsUpdate.set(
-          camera:
-              CameraInputSettingsUpdate
-                  .set(
-            isEnabled:
-                BoolUpdate.set(next),
+        inputs: InputSettingsUpdate.set(
+          camera: CameraInputSettingsUpdate.set(
+            isEnabled: BoolUpdate.set(next),
           ),
         ),
       );
 
       cameraEnabled = next;
-
       notifyListeners();
     } catch (_) {}
   }
-
-  // ------------------------------------------------------------
-  // CAMERA FLIP
-  // ------------------------------------------------------------
 
   Future<void> flipCamera() async {
     final c = client;
+    if (c == null || _leaveOperation != null) return;
 
-    if (c == null ||
-        _leaveOperation != null) {
-      return;
-    }
-
-    final nextFacing =
-        usingFrontCamera
-            ? MediaTrackFacingMode
-                .environment
-            : MediaTrackFacingMode.user;
+    final nextFacing = usingFrontCamera
+        ? MediaTrackFacingMode.environment
+        : MediaTrackFacingMode.user;
 
     try {
-      await c.setCameraFacingMode(
-        facingMode: nextFacing,
-      );
-
-      usingFrontCamera =
-          !usingFrontCamera;
-
+      await c.setCameraFacingMode(facingMode: nextFacing);
+      usingFrontCamera = !usingFrontCamera;
       notifyListeners();
     } catch (_) {}
   }
 
-  // ------------------------------------------------------------
+  // --------------------------------------------------------------------------
   // REMOTE PARTICIPANTS
-  // ------------------------------------------------------------
+  // --------------------------------------------------------------------------
 
-  Future<void>
-      _updateRemoteParticipants(
-    Map<String,
-            RemoteParticipantUpdate>
-        byId,
+  Future<void> _updateRemoteParticipants(
+    Map<String, RemoteParticipantUpdate> byId,
   ) async {
     final c = client;
 
-    if (!isOwner ||
-        c == null ||
-        byId.isEmpty ||
-        _leaveOperation != null) {
+    if (!isOwner || c == null || byId.isEmpty || _leaveOperation != null) {
       return;
     }
 
     await c.updateRemoteParticipants(
-      updates:
-          RemoteParticipantSettingsUpdatesById
-              .set(
+      updates: RemoteParticipantSettingsUpdatesById.set(
         updates: {
-          for (final entry
-              in byId.entries)
-            ParticipantId(entry.key):
-                entry.value,
+          for (final entry in byId.entries)
+            ParticipantId(entry.key): entry.value,
         },
       ),
     );
   }
 
-  Future<void> muteParticipant(
-    String participantId,
-  ) async {
+  Future<void> muteParticipant(String participantId) async {
     await _updateRemoteParticipants({
-      participantId:
-          RemoteParticipantUpdate.set(
-        inputsEnabled:
-            RemoteInputsEnabledUpdate.set(
-          microphone: false,
-        ),
+      participantId: RemoteParticipantUpdate.set(
+        inputsEnabled: RemoteInputsEnabledUpdate.set(microphone: false),
       ),
     });
   }
 
-  Future<void>
-      _setAllMicrophones(
-    bool enabled,
-  ) async {
+  Future<void> _setAllMicrophones(bool enabled) async {
     await _updateRemoteParticipants({
-      for (final id
-          in participants.keys)
-        id:
-            RemoteParticipantUpdate.set(
-          inputsEnabled:
-              RemoteInputsEnabledUpdate.set(
-            microphone: enabled,
-          ),
+      for (final id in participants.keys)
+        id: RemoteParticipantUpdate.set(
+          inputsEnabled: RemoteInputsEnabledUpdate.set(microphone: enabled),
         ),
     });
   }
 
-  Future<void>
-      muteAllParticipants() async {
+  Future<void> muteAllParticipants() async {
     await _setAllMicrophones(false);
-
     allMuted = true;
-
     notifyListeners();
   }
 
-  Future<void>
-      unmuteAllParticipants() async {
+  Future<void> unmuteAllParticipants() async {
     await _setAllMicrophones(true);
-
     allMuted = false;
-
     notifyListeners();
   }
 
@@ -597,36 +497,22 @@ class DailyCallSession extends ChangeNotifier {
     }
   }
 
-  // ------------------------------------------------------------
+  // --------------------------------------------------------------------------
   // LEAVE
-  // ------------------------------------------------------------
+  // --------------------------------------------------------------------------
 
+  /// Idempotent. If the full screen and the bubble both hang up at the same
+  /// instant, they share ONE leave and ONE dispose.
   Future<void> leave() {
-    // IMPORTANT:
-    //
-    // If both the full screen and bubble call leave()
-    // at almost the same time, return the SAME Future.
-    //
-    // This means Daily receives exactly one leave()
-    // and exactly one dispose().
-    final existing =
-        _leaveOperation;
+    final existing = _leaveOperation;
+    if (existing != null) return existing;
 
-    if (existing != null) {
-      return existing;
-    }
+    final operation = _performLeave();
 
-    final operation =
-        _performLeave();
-
-    _leaveOperation =
-        operation;
+    _leaveOperation = operation;
 
     operation.whenComplete(() {
-      if (identical(
-        _leaveOperation,
-        operation,
-      )) {
+      if (identical(_leaveOperation, operation)) {
         _leaveOperation = null;
       }
     });
@@ -635,95 +521,58 @@ class DailyCallSession extends ChangeNotifier {
   }
 
   Future<void> _performLeave() async {
-    final clientToLeave =
-        client;
+    final clientToLeave = client;
 
-    // Stop Daily callbacks first.
-    await _eventSubscription
-        ?.cancel();
-
+    // 1. Stop Daily callbacks.
+    await _eventSubscription?.cancel();
     _eventSubscription = null;
 
-    // Stop REST polling.
+    // 2. Stop REST polling.
     _handsPollTimer?.cancel();
-
     _handsPollTimer = null;
 
-    // ----------------------------------------------------------
-    // IMPORTANT:
-    //
-    // Detach the Daily client from the provider BEFORE calling
-    // native leave/dispose.
-    //
-    // This makes both the full-screen VideoView and bubble stop
-    // rendering the client.
-    // ----------------------------------------------------------
+    // 3. Detach every renderer from its track BEFORE the native client dies.
+    //    This is the step that was missing. Nulling `client` hides the
+    //    VideoView widgets, but the VideoViewControllers were still holding
+    //    native track handles when dispose() ran underneath them.
+    _releaseAllTracks();
 
+    // 4. Now drop the client reference so no widget can re-attach.
     client = null;
-
     isMinimized = false;
-
     participants.clear();
-
     raisedHands = [];
-
     myHandRaised = false;
 
     notifyListeners();
 
-    // Give Flutter a frame to remove all VideoViews before
-    // destroying the native CallClient.
-    try {
-      await WidgetsBinding
-          .instance.endOfFrame;
-    } catch (_) {
-      await Future<void>.delayed(
-        Duration.zero,
-      );
-    }
+    // 5. Let Flutter render one frame without any VideoView. endOfFrame can
+    //    hang if no frame is ever scheduled, so it is raced against a
+    //    deadline rather than awaited blindly.
+    await _nextFrame();
 
     if (clientToLeave == null) {
       _reset();
-
       return;
     }
 
-    // ----------------------------------------------------------
-    // Native Daily shutdown
-    // ----------------------------------------------------------
-
-    try {
-      await clientToLeave
-          .leave();
-    } catch (e, stackTrace) {
-      debugPrint(
-        'Daily client leave error: $e',
-      );
-
-      debugPrint(
-        'Daily client leave stack trace:\n$stackTrace',
-      );
-    }
-
-    try {
-      await clientToLeave
-          .dispose();
-    } catch (e, stackTrace) {
-      debugPrint(
-        'Daily client dispose error: $e',
-      );
-
-      debugPrint(
-        'Daily client dispose stack trace:\n$stackTrace',
-      );
-    }
+    await _destroyClient(clientToLeave);
 
     _reset();
   }
 
-  // ------------------------------------------------------------
+  Future<void> _nextFrame() async {
+    try {
+      await WidgetsBinding.instance.endOfFrame
+          .timeout(const Duration(milliseconds: 250));
+    } catch (_) {
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
+
+  // --------------------------------------------------------------------------
   // RESET
-  // ------------------------------------------------------------
+  // --------------------------------------------------------------------------
 
   void _reset() {
     client = null;
@@ -732,13 +581,10 @@ class DailyCallSession extends ChangeNotifier {
     liveClassTitle = null;
 
     isOwner = false;
-
     isMinimized = false;
-
     allMuted = false;
 
     raisedHands = [];
-
     myHandRaised = false;
 
     _currentUserId = null;
@@ -747,16 +593,35 @@ class DailyCallSession extends ChangeNotifier {
 
     notifyListeners();
   }
+
+  @override
+  void dispose() {
+    _disposed = true;
+
+    _handsPollTimer?.cancel();
+    _handsPollTimer = null;
+
+    final sub = _eventSubscription;
+    _eventSubscription = null;
+    if (sub != null) {
+      unawaited(sub.cancel());
+    }
+
+    _trackReleaseCallbacks.clear();
+
+    final orphan = client;
+    client = null;
+
+    if (orphan != null) {
+      // Provider is going away with a live call — don't leak the camera.
+      unawaited(_destroyClient(orphan));
+    }
+
+    super.dispose();
+  }
 }
 
 final dailyCallSessionProvider =
-    ChangeNotifierProvider<
-        DailyCallSession>(
-  (ref) {
-    return DailyCallSession(
-      ref.watch(
-        liveClassRepositoryProvider,
-      ),
-    );
-  },
-);
+    ChangeNotifierProvider<DailyCallSession>((ref) {
+  return DailyCallSession(ref.watch(liveClassRepositoryProvider));
+});
