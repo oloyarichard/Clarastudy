@@ -8,21 +8,25 @@ import '../../providers/daily_call_session_provider.dart';
 import 'camera_off_placeholder.dart';
 import 'daily_call_screen.dart';
 
-/// A small draggable floating bubble shown over the rest of the app
-/// whenever a call is active but minimized.
 class MiniCallBubble extends ConsumerStatefulWidget {
   const MiniCallBubble({super.key});
 
   @override
-  ConsumerState<MiniCallBubble> createState() => _MiniCallBubbleState();
+  ConsumerState<MiniCallBubble> createState() =>
+      _MiniCallBubbleState();
 }
 
-class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
-  Offset _offset = const Offset(16, 100);
-  bool _leaving = false;
+class _MiniCallBubbleState
+    extends ConsumerState<MiniCallBubble> {
+  Offset _offset =
+      const Offset(16, 100);
 
-  final _videoController = VideoViewController();
+  final _videoController =
+      VideoViewController();
+
   MediaStreamTrack? _lastTrack;
+
+  bool _leaving = false;
 
   @override
   void dispose() {
@@ -30,62 +34,141 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
     super.dispose();
   }
 
-  void _syncVideoTrack(DailyCallSession session) {
-    if (_leaving) return;
-    final track = session.client?.participants.local.media?.camera.track;
+  void _syncVideoTrack(
+    DailyCallSession session,
+  ) {
+    if (_leaving) {
+      return;
+    }
+
+    final track = session
+        .client
+        ?.participants
+        .local
+        .media
+        ?.camera
+        .track;
+
     if (track != _lastTrack) {
       _lastTrack = track;
+
       _videoController.setTrack(track);
     }
   }
 
-  Future<void> _handleLeave(DailyCallSession session) async {
-    if (mounted) {
-      setState(() => _leaving = true);
+  Future<void> _leave() async {
+    if (_leaving) {
+      return;
     }
-    await session.leave();
+
+    setState(() {
+      _leaving = true;
+    });
+
+    try {
+      await ref
+          .read(dailyCallSessionProvider)
+          .leave();
+    } catch (e, stackTrace) {
+      debugPrint(
+        'Bubble leave error: $e',
+      );
+
+      debugPrint(
+        'Bubble leave stack trace:\n$stackTrace',
+      );
+    }
+  }
+
+  void _maximize(
+    DailyCallSession session,
+  ) {
+    if (_leaving) {
+      return;
+    }
+
+    final liveClassId =
+        session.liveClassId;
+
+    if (liveClassId == null) {
+      return;
+    }
+
+    final liveClassTitle =
+        session.liveClassTitle ??
+            'Live class';
+
+    session.maximize();
+
+    rootNavigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => DailyCallScreen(
+          liveClassId: liveClassId,
+          liveClassTitle: liveClassTitle,
+        ),
+        fullscreenDialog: true,
+      ),
+    );
   }
 
   @override
-  Widget build(BuildContext context) {
-    final session = ref.watch(dailyCallSessionProvider);
-    if (!session.hasActiveCall || !session.isMinimized || _leaving) {
+  Widget build(
+    BuildContext context,
+  ) {
+    final session =
+        ref.watch(
+      dailyCallSessionProvider,
+    );
+
+    if (!session.hasActiveCall ||
+        !session.isMinimized ||
+        _leaving) {
       return const SizedBox.shrink();
     }
 
     _syncVideoTrack(session);
-    final showVideo = session.cameraEnabled && _lastTrack != null;
-    final screenSize = MediaQuery.of(context).size;
+
+    final showVideo =
+        session.cameraEnabled &&
+        _lastTrack != null;
+
+    final screenSize =
+        MediaQuery.of(context).size;
 
     return Positioned(
       left: _offset.dx,
       top: _offset.dy,
       child: GestureDetector(
         onPanUpdate: (details) {
+          if (_leaving) {
+            return;
+          }
+
           setState(() {
-            final next = _offset + details.delta;
+            final next =
+                _offset + details.delta;
+
             _offset = Offset(
-              next.dx.clamp(0, screenSize.width - 120),
-              next.dy.clamp(0, screenSize.height - 160),
+              next.dx.clamp(
+                0,
+                screenSize.width - 120,
+              ),
+              next.dy.clamp(
+                0,
+                screenSize.height - 160,
+              ),
             );
           });
         },
         onTap: () {
-          session.maximize();
-          rootNavigatorKey.currentState?.push(
-            MaterialPageRoute(
-              builder: (_) => DailyCallScreen(
-                liveClassId: session.liveClassId!,
-                liveClassTitle: session.liveClassTitle ?? 'Live class',
-              ),
-              fullscreenDialog: true,
-            ),
-          );
+          _maximize(session);
         },
         child: Material(
           elevation: 8,
-          borderRadius: BorderRadius.circular(16),
-          clipBehavior: Clip.antiAlias,
+          borderRadius:
+              BorderRadius.circular(16),
+          clipBehavior:
+              Clip.antiAlias,
           child: Container(
             width: 120,
             height: 160,
@@ -95,28 +178,50 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
               children: [
                 if (session.client != null)
                   showVideo
-                      ? VideoView(controller: _videoController)
+                      ? VideoView(
+                          controller:
+                              _videoController,
+                        )
                       : CameraOffPlaceholder(
-                          displayName: session.liveClassTitle ?? 'Call',
+                          displayName:
+                              session.liveClassTitle ??
+                                  'Call',
                           compact: true,
                         ),
+
                 Positioned(
                   top: 4,
                   right: 4,
                   child: GestureDetector(
-                    onTap: () => _handleLeave(session),
-                    child: const CircleAvatar(
+                    behavior:
+                        HitTestBehavior.opaque,
+                    onTap: _leave,
+                    child:
+                        const CircleAvatar(
                       radius: 12,
-                      backgroundColor: AppColors.error,
-                      child: Icon(Icons.call_end_rounded, size: 14, color: Colors.white),
+                      backgroundColor:
+                          AppColors.error,
+                      child: Icon(
+                        Icons
+                            .call_end_rounded,
+                        size: 14,
+                        color:
+                            Colors.white,
+                      ),
                     ),
                   ),
                 ),
+
                 if (!session.micEnabled)
                   const Positioned(
                     bottom: 4,
                     left: 4,
-                    child: Icon(Icons.mic_off_rounded, color: Colors.white, size: 16),
+                    child: Icon(
+                      Icons.mic_off_rounded,
+                      color:
+                          Colors.white,
+                      size: 16,
+                    ),
                   ),
               ],
             ),
