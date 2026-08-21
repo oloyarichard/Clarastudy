@@ -29,6 +29,7 @@ class _CreateCourseScreenState extends ConsumerState<CreateCourseScreen> {
   String _level = 'beginner';
   XFile? _thumbnail;
   bool _submitting = false;
+  double? _uploadProgress;
 
   @override
   void dispose() {
@@ -47,7 +48,10 @@ class _CreateCourseScreenState extends ConsumerState<CreateCourseScreen> {
     final user = ref.read(authProvider).user;
     if (user == null) return;
 
-    setState(() => _submitting = true);
+    setState(() {
+      _submitting = true;
+      _uploadProgress = _thumbnail != null ? 0 : null;
+    });
     try {
       final course = await ref.read(courseRepositoryProvider).createCourse(
             title: _titleController.text.trim(),
@@ -56,6 +60,11 @@ class _CreateCourseScreenState extends ConsumerState<CreateCourseScreen> {
             level: _level,
             price: _price,
             thumbnailPath: _thumbnail?.path,
+            onProgress: _thumbnail == null
+                ? null
+                : (p) {
+                    if (mounted) setState(() => _uploadProgress = p);
+                  },
           );
       ref.invalidate(myTaughtCoursesProvider(user.id));
       ref.invalidate(coursesListProvider);
@@ -68,7 +77,12 @@ class _CreateCourseScreenState extends ConsumerState<CreateCourseScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _uploadProgress = null;
+        });
+      }
     }
   }
 
@@ -159,9 +173,22 @@ class _CreateCourseScreenState extends ConsumerState<CreateCourseScreen> {
                   }).toList(),
                 ),
                 const SizedBox(height: 28),
+                if (_uploadProgress != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: _uploadProgress,
+                      minHeight: 6,
+                      backgroundColor: AppColors.border,
+                      valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 PrimaryButton(
                   label: 'Create course',
                   isLoading: _submitting,
+                  progress: _uploadProgress,
                   onPressed: _submit,
                 ),
               ],
