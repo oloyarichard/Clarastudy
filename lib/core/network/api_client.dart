@@ -153,26 +153,42 @@ class ApiClient {
 
   /// POST with multipart/form-data — used for endpoints that may include
   /// a file (profile picture, course thumbnail, resource upload).
+  ///
+  /// [onSendProgress] fires as bytes go out, with (sent, total). Pass it
+  /// straight through from a UI screen to drive a progress bar during a
+  /// file upload — Dio already tracks this natively, nothing extra needed
+  /// on the server side.
   Future<Response<dynamic>> postMultipart(
     String path,
-    Map<String, dynamic> fields,
-  ) async {
+    Map<String, dynamic> fields, {
+    ProgressCallback? onSendProgress,
+  }) async {
     try {
       final formData = FormData.fromMap(fields);
-      return await dio.post(path, data: formData);
+      return await dio.post(
+        path,
+        data: formData,
+        onSendProgress: onSendProgress,
+      );
     } on DioException catch (e) {
       throw ApiException.fromDioException(e);
     }
   }
 
-  /// PUT/PATCH with multipart/form-data.
+  /// PUT/PATCH with multipart/form-data. See [postMultipart] for
+  /// [onSendProgress].
   Future<Response<dynamic>> patchMultipart(
     String path,
-    Map<String, dynamic> fields,
-  ) async {
+    Map<String, dynamic> fields, {
+    ProgressCallback? onSendProgress,
+  }) async {
     try {
       final formData = FormData.fromMap(fields);
-      return await dio.patch(path, data: formData);
+      return await dio.patch(
+        path,
+        data: formData,
+        onSendProgress: onSendProgress,
+      );
     } on DioException catch (e) {
       throw ApiException.fromDioException(e);
     }
