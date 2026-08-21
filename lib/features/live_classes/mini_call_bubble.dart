@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:daily_flutter/daily_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,14 +35,23 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
   DailyCallSession? _session;
 
   @override
-void initState() {
-  super.initState();
+  void initState() {
+    super.initState();
 
-  // ref.read is safe here (unlike ref.watch, which needs build()).
-  final session = ref.read(dailyCallSessionProvider);
-  session.addTrackReleaseCallback(_releaseTrack);
-  _session = session;
-}
+    // ref.read is safe here (unlike ref.watch, which needs build()).
+    //
+    // Deliberately NOT `_session = ref.read(...)..addTrackReleaseCallback(...)`.
+    // With _session's type being DailyCallSession?, some Dart/Flutter SDK
+    // versions infer the cascade receiver against that nullable context
+    // type and reject the method call at compile time ("cannot be called
+    // on 'DailyCallSession?'"). Splitting it removes the ambiguity: this
+    // local is inferred purely from ref.read's return type, which is
+    // non-nullable.
+    final session = ref.read(dailyCallSessionProvider);
+    session.addTrackReleaseCallback(_releaseTrack);
+    _session = session;
+  }
+
   @override
   void dispose() {
     _session?.removeTrackReleaseCallback(_releaseTrack);
@@ -71,28 +82,39 @@ void initState() {
     }
   }
 
-  Future<void> _hangUp(DailyCallSession session) async {
+  void _hangUp(DailyCallSession session) {
     if (_leaving) return;
 
+    // Hide the bubble FIRST — this is the bubble's equivalent of popping
+    // the full-screen call away. build() reacts to _leaving immediately
+    // and returns SizedBox.shrink(), so the bubble is gone from the
+    // screen before any real cleanup work below has even started.
     setState(() => _leaving = true);
 
-    try {
-      // The provider owns the ONLY Daily leave/dispose operation.
-      await session.leave();
-    } catch (e) {
-      debugPrint('Bubble leave error: $e');
-    }
+    // Everything else — releasing the track, leaving the Daily room,
+    // disposing the native client — happens in the background afterward.
+    // Nothing here blocks the tap or the bubble's disappearance.
+    final cleanup = session.leave();
 
-    // CRITICAL: this State is never disposed (the bubble lives in
-    // MaterialApp.builder for the app's whole life). Leaving _leaving = true
-    // meant that after ONE hang-up from the bubble, the bubble was dead for
-    // every future call — it rendered SizedBox.shrink() forever and never
-    // synced a track again. Reset it.
-    if (mounted) {
-      setState(() => _leaving = false);
-    } else {
-      _leaving = false;
-    }
+    unawaited(
+      cleanup
+          .catchError((Object e, StackTrace stackTrace) {
+        debugPrint('Bubble leave error: $e');
+        debugPrint('Bubble leave stack trace:\n$stackTrace');
+      }).whenComplete(() {
+        // CRITICAL: this State is never disposed (the bubble lives in
+        // MaterialApp.builder for the app's whole life). Leaving
+        // _leaving = true forever meant that after ONE hang-up from the
+        // bubble, it was dead for every future call — it rendered
+        // SizedBox.shrink() forever and never synced a track again.
+        // Reset it once the background cleanup actually finishes.
+        if (mounted) {
+          setState(() => _leaving = false);
+        } else {
+          _leaving = false;
+        }
+      }),
+    );
   }
 
   void _openFullScreen(DailyCallSession session) {
