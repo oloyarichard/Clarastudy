@@ -27,6 +27,7 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   late final TextEditingController _cityController;
   XFile? _newPicture;
   bool _submitting = false;
+  double? _uploadProgress;
 
   @override
   void initState() {
@@ -57,7 +58,13 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
   }
 
   Future<void> _submit() async {
-    setState(() => _submitting = true);
+    setState(() {
+      _submitting = true;
+      // Only a picture upload has real bytes to track — a text-only save
+      // has nothing for a progress bar to measure, so leave it null and
+      // PrimaryButton falls back to its plain indeterminate spinner.
+      _uploadProgress = _newPicture != null ? 0 : null;
+    });
     try {
       final updated = await ref.read(authRepositoryProvider).updateProfile(
             firstName: _firstNameController.text.trim(),
@@ -67,6 +74,11 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
             country: _countryController.text.trim(),
             city: _cityController.text.trim(),
             profilePicturePath: _newPicture?.path,
+            onProgress: _newPicture == null
+                ? null
+                : (p) {
+                    if (mounted) setState(() => _uploadProgress = p);
+                  },
           );
       ref.read(authProvider.notifier).updateLocalUser(updated);
       if (mounted) {
@@ -81,7 +93,12 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _uploadProgress = null;
+        });
+      }
     }
   }
 
@@ -170,9 +187,22 @@ class _EditProfileScreenState extends ConsumerState<EditProfileScreen> {
                 ],
               ),
               const SizedBox(height: 28),
+              if (_uploadProgress != null) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: _uploadProgress,
+                    minHeight: 6,
+                    backgroundColor: AppColors.border,
+                    valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               PrimaryButton(
                 label: 'Save changes',
                 isLoading: _submitting,
+                progress: _uploadProgress,
                 onPressed: _submit,
               ),
             ],
