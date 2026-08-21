@@ -26,16 +26,25 @@ class ResourceRepository {
     bool isDownloadable = true,
     required String courseId,
     String? lessonId,
+    void Function(double progress)? onProgress,
   }) async {
-    final response = await _api.postMultipart(ApiConfig.resourceUpload, {
-      'title': title,
-      if (description != null) 'description': description,
-      'resource_type': resourceType,
-      'is_downloadable': isDownloadable,
-      'course': courseId,
-      if (lessonId != null) 'lesson': lessonId,
-      'file': await MultipartFile.fromFile(filePath),
-    });
+    final response = await _api.postMultipart(
+      ApiConfig.resourceUpload,
+      {
+        'title': title,
+        if (description != null) 'description': description,
+        'resource_type': resourceType,
+        'is_downloadable': isDownloadable,
+        'course': courseId,
+        if (lessonId != null) 'lesson': lessonId,
+        'file': await MultipartFile.fromFile(filePath),
+      },
+      onSendProgress: onProgress == null
+          ? null
+          : (sent, total) {
+              if (total > 0) onProgress(sent / total);
+            },
+    );
     return Resource.fromJson(response.data as Map<String, dynamic>);
   }
 
