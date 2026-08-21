@@ -56,6 +56,8 @@ class AuthRepository {
   /// Updates the profile. If [profilePicturePath] is provided, the
   /// request is sent as multipart/form-data so the image file can ride
   /// along with the text fields; otherwise a plain JSON PATCH is used.
+  /// [onProgress] only fires when [profilePicturePath] is set — a plain
+  /// text-only PATCH has nothing worth showing progress for.
   Future<AppUser> updateProfile({
     String? firstName,
     String? lastName,
@@ -64,6 +66,7 @@ class AuthRepository {
     String? country,
     String? city,
     String? profilePicturePath,
+    void Function(double progress)? onProgress,
   }) async {
     final fields = <String, dynamic>{
       if (firstName != null) 'first_name': firstName,
@@ -75,10 +78,18 @@ class AuthRepository {
     };
 
     final response = profilePicturePath != null
-        ? await _api.patchMultipart(ApiConfig.profile, {
-            ...fields,
-            'profile_picture': await MultipartFile.fromFile(profilePicturePath),
-          })
+        ? await _api.patchMultipart(
+            ApiConfig.profile,
+            {
+              ...fields,
+              'profile_picture': await MultipartFile.fromFile(profilePicturePath),
+            },
+            onSendProgress: onProgress == null
+                ? null
+                : (sent, total) {
+                    if (total > 0) onProgress(sent / total);
+                  },
+          )
         : await _api.patch(ApiConfig.profile, data: fields);
 
     return AppUser.fromJson(response.data as Map<String, dynamic>);
