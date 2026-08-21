@@ -26,6 +26,7 @@ class _UploadResourceScreenState extends ConsumerState<UploadResourceScreen> {
   String _resourceType = 'document';
   PlatformFile? _file;
   bool _submitting = false;
+  double? _uploadProgress;
   String? _selectedCourseId;
 
   static const _types = ['document', 'pdf', 'video'];
@@ -59,7 +60,10 @@ class _UploadResourceScreenState extends ConsumerState<UploadResourceScreen> {
       return;
     }
 
-    setState(() => _submitting = true);
+    setState(() {
+      _submitting = true;
+      _uploadProgress = 0;
+    });
     try {
       await ref.read(resourceRepositoryProvider).uploadResource(
             title: _titleController.text.trim(),
@@ -67,6 +71,9 @@ class _UploadResourceScreenState extends ConsumerState<UploadResourceScreen> {
             resourceType: _resourceType,
             filePath: _file!.path!,
             courseId: _selectedCourseId!,
+            onProgress: (p) {
+              if (mounted) setState(() => _uploadProgress = p);
+            },
           );
       ref.invalidate(resourcesListProvider);
       if (mounted) {
@@ -81,7 +88,12 @@ class _UploadResourceScreenState extends ConsumerState<UploadResourceScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _uploadProgress = null;
+        });
+      }
     }
   }
 
@@ -187,9 +199,22 @@ class _UploadResourceScreenState extends ConsumerState<UploadResourceScreen> {
                   ),
                 ),
                 const SizedBox(height: 28),
+                if (_uploadProgress != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: _uploadProgress,
+                      minHeight: 6,
+                      backgroundColor: AppColors.border,
+                      valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 PrimaryButton(
                   label: 'Upload',
                   isLoading: _submitting,
+                  progress: _uploadProgress,
                   onPressed: _submit,
                 ),
               ],
