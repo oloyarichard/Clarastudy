@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
@@ -56,6 +57,7 @@ class PrimaryButton extends StatelessWidget {
     required this.onPressed,
     this.isLoading = false,
     this.icon,
+    this.progress,
   });
 
   final String label;
@@ -63,18 +65,36 @@ class PrimaryButton extends StatelessWidget {
   final bool isLoading;
   final IconData? icon;
 
+  /// 0.0–1.0 upload/download progress. When set (and [isLoading] is true),
+  /// shows a determinate ring with a live percentage instead of the plain
+  /// spinner — pass this straight from a repository's onProgress callback.
+  /// Leave null for actions with no measurable progress (keeps the old
+  /// indeterminate spinner behavior).
+  final double? progress;
+
   @override
   Widget build(BuildContext context) {
     return ElevatedButton(
       onPressed: isLoading ? null : onPressed,
       child: isLoading
-          ? const SizedBox(
-              height: 22,
-              width: 22,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                color: Colors.white,
-              ),
+          ? Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  height: 22,
+                  width: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: Colors.white,
+                    value: progress,
+                  ),
+                ),
+                if (progress != null) ...[
+                  const SizedBox(width: 10),
+                  Text('${(progress! * 100).round()}%'),
+                ],
+              ],
             )
           : Row(
               mainAxisAlignment: MainAxisAlignment.center,
