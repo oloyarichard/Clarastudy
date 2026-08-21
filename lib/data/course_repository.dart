@@ -40,6 +40,7 @@ class CourseRepository {
     String level = 'beginner',
     double price = 0,
     String? thumbnailPath,
+    void Function(double progress)? onProgress,
   }) async {
     final fields = <String, dynamic>{
       'title': title,
@@ -51,7 +52,15 @@ class CourseRepository {
         if (thumbnailPath != null)
           'thumbnail': await MultipartFile.fromFile(thumbnailPath),
     };
-    final response = await _api.postMultipart(ApiConfig.courseCreate, fields);
+    final response = await _api.postMultipart(
+      ApiConfig.courseCreate,
+      fields,
+      onSendProgress: onProgress == null
+          ? null
+          : (sent, total) {
+              if (total > 0) onProgress(sent / total);
+            },
+    );
     return Course.fromJson(response.data as Map<String, dynamic>);
   }
   
