@@ -1,57 +1,813 @@
-Future<void> _leave() async {
-  // Prevent:
-  //
-  // Main hang-up
-  // +
-  // Android/system back
-  // +
-  // bubble hang-up
-  //
-  // from starting multiple route operations.
-  if (_leaving ||
-      _minimizing ||
-      !mounted) {
-    return;
-  }
+import 'dart:async';
 
-  setState(() {
-    _leaving = true;
+import 'package:daily_flutter/daily_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/theme/app_theme.dart';
+import '../../core/utils/call_permissions.dart';
+import '../../models/live_class_models.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/core_providers.dart';
+import '../../providers/daily_call_session_provider.dart';
+import '../../providers/live_class_providers.dart';
+import 'camera_off_placeholder.dart';
+
+/// Full-screen, in-app Daily.co call for a live class.
+///
+/// IMPORTANT LIFECYCLE RULES:
+///
+/// 1. DailyCallSession owns the native Daily CallClient.
+/// 2. This screen NEVER calls CallClient.dispose().
+/// 3. Minimizing removes only this Flutter route.
+/// 4. Minimizing NEVER calls Daily leave().
+/// 5. Full-screen hang-up calls DailyCallSession.leave().
+/// 6. Hang-up pops the route FIRST, then leaves/cleans up in the background.
+/// 7. PopScope must not interpret a minimize pop as a hang-up.
+/// 8. Once leaving starts, this screen stops touching Daily tracks.
+/// 9. The bubble and this screen use the same DailyCallSession.
+class DailyCallScreen extends ConsumerStatefulWidget {
+  const DailyCallScreen({
+    super.key,
+    required this.liveClassId,
+    required this.liveClassTitle,
+    this.credentials,
   });
 
-  // Exit immersive mode while the route is still alive.
-  _exitImmersive();
+  final String liveClassId;
+  final String liveClassTitle;
+  final DailyCallCredentials? credentials;
 
-  final session =
-      ref.read(
-    dailyCallSessionProvider,
-  );
+  @override
+  ConsumerState<DailyCallScreen> createState() =>
+      _DailyCallScreenState();
+}
 
-  // Detach this screen's renderers from Daily tracks NOW, while the route
-  // and its widgets are still alive and able to do it safely.
-  _releaseAllTracks();
+class _DailyCallScreenState
+    extends ConsumerState<DailyCallScreen> {
+  bool _joining = true;
+  bool _immersive = true;
+  bool _leaving = false;
+  bool _starting = false;
 
-  // Kick off the native teardown, but DO NOT block the UI on it.
+  // IMPORTANT:
+  // This is separate from _leaving.
   //
-  // The old code awaited session.leave() — native leave + dispose, which
-  // can take seconds on a bad connection — and only popped afterwards.
-  // The user pressed "end call" and sat looking at a frozen call screen.
-  // That is the "hanging up" problem.
-  //
-  // The provider is idempotent and owns the whole lifecycle, so it is safe
-  // to let it finish after this route is gone.
-  final teardown = session.leave();
+  // When true, the route is being popped ONLY because the user
+  // pressed minimize. PopScope must NOT call Daily leave().
+  bool _minimizing = false;
 
-  unawaited(
-    teardown.catchError((Object e, StackTrace stackTrace) {
-      debugPrint('Daily leave error: $e');
-      debugPrint('Daily leave stack trace:\n$stackTrace');
-    }),
-  );
+  String? _errorMessage;
+  bool _permissionPermanentlyDenied = false;
 
-  if (!mounted) {
-    return;
+  final VideoViewController _videoController =
+      VideoViewController();
+
+  MediaStreamTrack? _lastTrack;
+
+  final Map<String, VideoViewController>
+      _remoteControllers = {};
+
+  final Map<String, MediaStreamTrack?>
+      _remoteLastTracks = {};
+
+  String? _pinnedRemoteId;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _enterImmersive();
+
+    final session = ref.read(dailyCallSessionProvider);
+
+    session.addTrackReleaseCallback(_releaseAllTracks);
+
+    // IMPORTANT for the bubble -> full screen transition.
+    //
+    // _joining used to start as `true` unconditionally, and only flipped to
+    // false inside a post-frame callback. So re-opening an ALREADY RUNNING
+    // call still painted a black screen with a spinner for at least one
+    // frame before showing video. That flash was the "delay" when switching
+    // out of the bubble.
+    //
+    // If the call is already live, there is nothing to join — say so now,
+    // synchronously, before the first frame is ever built.
+    final alreadyLive = session.hasActiveCall &&
+        session.liveClassId == widget.liveClassId;
+
+    _joining = !alreadyLive;
+
+    if (alreadyLive) {
+      // Attach this screen's renderers to the live tracks straight away.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _leaving || _minimizing) return;
+        setState(() {});
+      });
+      return;
+    }
+
+    // Do not initialize Daily while the native Flutter route/view
+    // hierarchy is still being created.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) {
+        if (mounted && !_leaving) {
+          _ensureJoined();
+        }
+      },
+    );
   }
 
-  // Pop immediately — the call is already logically over.
-  Navigator.of(context).pop();
-}
+  /// Invoked by DailyCallSession right before the native client is
+  /// destroyed. Every controller must let go of its track here — disposing
+  /// the native client while a VideoViewController still points at a track
+  /// is a use-after-free, and that is what took the app down on hang-up.
+  void _releaseAllTracks() {
+    _lastTrack = null;
+
+    try {
+      _videoController.setTrack(null);
+    } catch (e) {
+      debugPrint('Local track release failed: $e');
+    }
+
+    for (final entry in _remoteControllers.entries) {
+      try {
+        entry.value.setTrack(null);
+      } catch (e) {
+        debugPrint('Remote track release failed: $e');
+      }
+    }
+
+    _remoteLastTracks.clear();
+  }
+
+  @override
+  void dispose() {
+    // IMPORTANT:
+    //
+    // The Daily CallClient belongs to DailyCallSession.
+    //
+    // We only dispose VideoView controllers owned by this screen.
+    // We NEVER call:
+    //
+    // ref.read(dailyCallSessionProvider).client?.dispose()
+    //
+    // from here.
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.edgeToEdge,
+    );
+
+    // Stop the session from calling back into a dead State.
+    ref
+        .read(dailyCallSessionProvider)
+        .removeTrackReleaseCallback(_releaseAllTracks);
+
+    // Detach before destroying, always in that order.
+    _releaseAllTracks();
+
+    _videoController.dispose();
+
+    for (final controller
+        in _remoteControllers.values) {
+      controller.dispose();
+    }
+
+    _remoteControllers.clear();
+    _remoteLastTracks.clear();
+
+    super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // SYSTEM UI
+  // ---------------------------------------------------------------------------
+
+  void _enterImmersive() {
+    if (!mounted || _leaving) {
+      return;
+    }
+
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.immersiveSticky,
+    );
+  }
+
+  void _exitImmersive() {
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.edgeToEdge,
+    );
+  }
+
+  void _toggleFullscreen() {
+    if (_leaving || _minimizing) {
+      return;
+    }
+
+    setState(() {
+      _immersive = !_immersive;
+    });
+
+    if (_immersive) {
+      _enterImmersive();
+    } else {
+      _exitImmersive();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // JOIN
+  // ---------------------------------------------------------------------------
+
+  Future<void> _ensureJoined() async {
+    if (_starting ||
+        _leaving ||
+        _minimizing ||
+        !mounted) {
+      return;
+    }
+
+    _starting = true;
+
+    try {
+      final session =
+          ref.read(dailyCallSessionProvider);
+
+      // If the call is already active, this screen only needs
+      // to display it.
+      //
+      // DO NOT create another CallClient.
+      if (session.hasActiveCall &&
+          session.liveClassId ==
+              widget.liveClassId) {
+        if (mounted && !_leaving) {
+          setState(() {
+            _joining = false;
+          });
+        }
+
+        return;
+      }
+
+      if (widget.credentials == null) {
+        if (mounted && !_leaving) {
+          setState(() {
+            _joining = false;
+            _errorMessage =
+                'No active call to show.';
+          });
+        }
+
+        return;
+      }
+
+      final user =
+          ref.read(authProvider).user;
+
+      await session.start(
+        liveClassId:
+            widget.liveClassId,
+        liveClassTitle:
+            widget.liveClassTitle,
+        credentials:
+            widget.credentials!,
+        currentUserId: user?.id,
+      );
+
+      if (mounted && !_leaving) {
+        setState(() {
+          _joining = false;
+        });
+      }
+    } on CallPermissionException catch (e) {
+      // This is the crash the app used to have: Daily's SDK does not ask
+      // for camera/mic permission itself, so creating a CallClient without
+      // it previously took the whole app down instead of surfacing here.
+      if (mounted && !_leaving) {
+        setState(() {
+          _joining = false;
+          _errorMessage = e.message;
+          _permissionPermanentlyDenied = e.permanentlyDenied;
+        });
+      }
+    } catch (e, stackTrace) {
+      debugPrint(
+        'Daily start error: $e',
+      );
+
+      debugPrint(
+        'Daily start stack trace:\n$stackTrace',
+      );
+
+      if (mounted && !_leaving) {
+        setState(() {
+          _joining = false;
+          _errorMessage =
+              'Could not join the call. Check your connection and try again.';
+          _permissionPermanentlyDenied = false;
+        });
+      }
+    } finally {
+      _starting = false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // LEAVE
+  // ---------------------------------------------------------------------------
+
+  Future<void> _leave() async {
+    // Prevent:
+    //
+    // Main hang-up
+    // +
+    // Android/system back
+    // +
+    // bubble hang-up
+    //
+    // from starting multiple route operations.
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
+      return;
+    }
+
+    setState(() {
+      _leaving = true;
+    });
+
+    // Exit immersive mode while the route is still alive.
+    _exitImmersive();
+
+    final session =
+        ref.read(
+      dailyCallSessionProvider,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    // Take the user back to the previous screen FIRST. Every bit of Daily
+    // cleanup — detaching tracks, leaving the room, disposing the native
+    // client — happens AFTER this pop, once the call screen and its video
+    // surface are already on their way out.
+    //
+    // Doing that cleanup BEFORE the pop meant the native call teardown
+    // could start while this screen's video surface was still fully
+    // mounted and actively rendering — exactly the kind of timing that
+    // crashes native video SDKs. Popping first means Flutter's own widget
+    // disposal (which detaches this screen's VideoViewControllers via
+    // dispose()) is already underway before anything touches the native
+    // client.
+    Navigator.of(context).pop();
+
+    // Still synchronous up to here — nothing above this line blocked on
+    // an await, so the navigation above is not delayed by any of this.
+    final teardown = session.leave();
+
+    unawaited(
+      teardown.catchError((Object e, StackTrace stackTrace) {
+        debugPrint('Daily leave error: $e');
+        debugPrint('Daily leave stack trace:\n$stackTrace');
+      }),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // MINIMIZE
+  // ---------------------------------------------------------------------------
+
+  void _minimize() {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
+      return;
+    }
+
+    final session =
+        ref.read(
+      dailyCallSessionProvider,
+    );
+
+    if (!session.hasActiveCall) {
+      return;
+    }
+
+    // Tell PopScope that the next pop is intentional
+    // and represents MINIMIZE, not LEAVE.
+    setState(() {
+      _minimizing = true;
+    });
+
+    // This ONLY changes provider UI state.
+    //
+    // It MUST NOT leave the Daily room.
+    session.minimize();
+
+    // Remove the full-screen route.
+    //
+    // The Daily CallClient stays alive inside
+    // DailyCallSession.
+    Navigator.of(context).pop();
+  }
+
+  // ---------------------------------------------------------------------------
+  // CAMERA
+  // ---------------------------------------------------------------------------
+
+  Future<void> _flipCamera() async {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
+      return;
+    }
+
+    try {
+      await ref
+          .read(
+            dailyCallSessionProvider,
+          )
+          .flipCamera();
+    } catch (e, stackTrace) {
+      debugPrint(
+        'Flip camera error: $e',
+      );
+
+      debugPrint(
+        'Flip camera stack trace:\n$stackTrace',
+      );
+
+      if (mounted && !_leaving) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not switch camera: $e',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // VIDEO TRACKS
+  // ---------------------------------------------------------------------------
+
+  void _syncVideoTrack(
+    DailyCallSession session,
+  ) {
+    // Deliberately NOT guarded by _minimizing: video must keep updating
+    // through the minimize fade, or the frozen last frame is what read as
+    // "visual delay" when switching to the bubble.
+    if (_leaving ||
+        session.isTearingDown ||
+        !mounted) {
+      return;
+    }
+
+    final track = session
+        .client
+        ?.participants
+        .local
+        .media
+        ?.camera
+        .track;
+
+    if (track != _lastTrack) {
+      _lastTrack = track;
+
+      if (!_leaving) {
+        _videoController.setTrack(
+          track,
+        );
+      }
+    }
+  }
+
+  void _syncRemoteControllers(
+    DailyCallSession session,
+  ) {
+    // Same reasoning as _syncVideoTrack: keep syncing through the minimize
+    // fade.
+    if (_leaving ||
+        session.isTearingDown ||
+        !mounted) {
+      return;
+    }
+
+    final remote =
+        session.client
+                ?.participants
+                .remote ??
+            {};
+
+    final currentIds = remote.keys
+        .map(
+          (id) => id.id,
+        )
+        .toSet();
+
+    // Remove controllers for participants
+    // who are no longer present.
+    final staleIds =
+        _remoteControllers.keys
+            .where(
+              (id) =>
+                  !currentIds.contains(id),
+            )
+            .toList();
+
+    for (final id in staleIds) {
+      if (_leaving || !mounted) {
+        return;
+      }
+
+      final controller =
+          _remoteControllers.remove(
+        id,
+      );
+
+      _remoteLastTracks.remove(id);
+
+      // Dispose only this screen's controller.
+      controller?.dispose();
+    }
+
+    // Create/update controllers for active
+    // remote participants.
+    for (final entry
+        in remote.entries) {
+      if (_leaving || !mounted) {
+        return;
+      }
+
+      final id = entry.key.id;
+
+      final track =
+          entry.value.media?.camera.track;
+
+      final controller =
+          _remoteControllers.putIfAbsent(
+        id,
+        () => VideoViewController(),
+      );
+
+      if (_remoteLastTracks[id] !=
+          track) {
+        _remoteLastTracks[id] = track;
+
+        if (!_leaving && mounted) {
+          controller.setTrack(track);
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // MAIN PARTICIPANT
+  // ---------------------------------------------------------------------------
+
+  MapEntry<String, Participant>?
+      _mainRemoteParticipant(
+    DailyCallSession session,
+  ) {
+    if (_leaving) {
+      return null;
+    }
+
+    final remote =
+        session.client
+                ?.participants
+                .remote ??
+            {};
+
+    if (remote.isEmpty) {
+      return null;
+    }
+
+    if (_pinnedRemoteId != null) {
+      final pinned =
+          remote.entries.where(
+        (entry) =>
+            entry.key.id ==
+            _pinnedRemoteId,
+      );
+
+      if (pinned.isNotEmpty) {
+        return MapEntry(
+          pinned.first.key.id,
+          pinned.first.value,
+        );
+      }
+
+      _pinnedRemoteId = null;
+    }
+
+    // Students see the moderator by default.
+    if (!session.isOwner) {
+      final moderator =
+          remote.entries.where(
+        (entry) =>
+            entry.value.info.isOwner,
+      );
+
+      if (moderator.isNotEmpty) {
+        return MapEntry(
+          moderator.first.key.id,
+          moderator.first.value,
+        );
+      }
+    }
+
+    // Teacher's own video remains default.
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // LOCAL VIDEO
+  // ---------------------------------------------------------------------------
+
+  Widget _localVideoTile(
+    DailyCallSession session, {
+    bool compact = false,
+  }) {
+    // Only a real teardown blanks the tile. Minimizing keeps rendering so
+    // the fade to the bubble stays continuous instead of flashing black.
+    if (_leaving) {
+      return const ColoredBox(
+        color: Colors.black,
+      );
+    }
+
+    final showVideo =
+        session.cameraEnabled &&
+        _lastTrack != null;
+
+    if (showVideo) {
+      return VideoView(
+        controller:
+            _videoController,
+      );
+    }
+
+    return CameraOffPlaceholder(
+      displayName:
+          ref
+                  .watch(
+                    authProvider,
+                  )
+                  .user
+                  ?.displayName ??
+              'You',
+      compact: compact,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // REMOTE VIDEO
+  // ---------------------------------------------------------------------------
+
+  Widget _remoteVideoTile(
+    String id,
+    Participant participant, {
+    bool compact = false,
+  }) {
+    if (_leaving) {
+      return const ColoredBox(
+        color: Colors.black,
+      );
+    }
+
+    final controller =
+        _remoteControllers[id];
+
+    final showVideo =
+        !participant.isCameraMuted &&
+        controller != null;
+
+    if (showVideo) {
+      return VideoView(
+        controller: controller,
+      );
+    }
+
+    return CameraOffPlaceholder(
+      displayName:
+          participant
+                      .info
+                      .username
+                      ?.isNotEmpty ??
+                  false
+              ? participant
+                  .info
+                  .username!
+              : 'Participant',
+      compact: compact,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // THUMBNAILS
+  // ---------------------------------------------------------------------------
+
+  Widget _thumbnailStrip(
+    DailyCallSession session,
+    String? mainRemoteId,
+  ) {
+    if (_leaving) {
+      return const SizedBox.shrink();
+    }
+
+    final remote =
+        session.client
+                ?.participants
+                .remote ??
+            {};
+
+    final others =
+        remote.entries
+            .where(
+              (entry) =>
+                  entry.key.id !=
+                  mainRemoteId,
+            )
+            .toList();
+
+    final showLocalTile =
+        mainRemoteId != null;
+
+    if (others.isEmpty &&
+        !showLocalTile) {
+      return const SizedBox.shrink();
+    }
+
+    return SizedBox(
+      height: 90,
+      child: ListView(
+        scrollDirection:
+            Axis.horizontal,
+        padding:
+            const EdgeInsets.symmetric(
+          horizontal: 16,
+        ),
+        children: [
+          if (showLocalTile)
+            _thumbnailTile(
+              child:
+                  _localVideoTile(
+                session,
+                compact: true,
+              ),
+              muted:
+                  !session.micEnabled,
+              onTap: () {
+                if (!_leaving &&
+                    !_minimizing &&
+                    mounted) {
+                  setState(() {
+                    _pinnedRemoteId =
+                        null;
+                  });
+                }
+              },
+            ),
+          ...others.map(
+            (entry) =>
+                _thumbnailTile(
+              child:
+                  _remoteVideoTile(
+                entry.key.id,
+                entry.value,
+                compact: true,
+              ),
+              muted: entry.value
+                  .isMicrophoneMuted,
+              onTap: () {
+                if (!_leaving &&
+                    !_minimizing &&
+                    mounted) {
+                  setState(() {
+                    _pinnedRemoteId =
+                        entry.key.id;
+                  });
+                }
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _thumbnailTile({
+    required Widget child,
+    required VoidCallback onTap,
+    bool muted = false,
+  }) {
+    return Padding(
+      padding:
+          const EdgeInsets.only(
+        right: 1
