@@ -486,7 +486,6 @@ class _DailyCallScreenState
       }
     }
   }
-
   void _syncRemoteControllers(
     DailyCallSession session,
   ) {
@@ -810,4 +809,1206 @@ class _DailyCallScreenState
     return Padding(
       padding:
           const EdgeInsets.only(
-        right: 1
+        right: 10,
+      ),
+      child: GestureDetector(
+        onTap:
+            _leaving ||
+                    _minimizing
+                ? null
+                : onTap,
+        child: ClipRRect(
+          borderRadius:
+              BorderRadius.circular(
+            10,
+          ),
+          child: SizedBox(
+            width: 68,
+            height: 90,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Container(
+                  color: Colors.black,
+                  child: child,
+                ),
+                if (muted)
+                  const Positioned(
+                    bottom: 4,
+                    left: 4,
+                    child: Icon(
+                      Icons
+                          .mic_off_rounded,
+                      color:
+                          Colors.white,
+                      size: 16,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // CHAT
+  // ---------------------------------------------------------------------------
+
+  void _openAppChat() {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor:
+          Colors.transparent,
+      builder: (_) =>
+          _LiveClassChatSheet(
+        liveClassId:
+            widget.liveClassId,
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // PARTICIPANTS
+  // ---------------------------------------------------------------------------
+
+  void _openParticipants() {
+    if (_leaving ||
+        _minimizing ||
+        !mounted) {
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor:
+          AppColors.cardLight,
+      builder: (_) => Consumer(
+        builder:
+            (context, ref, __) {
+          final session =
+              ref.watch(
+            dailyCallSessionProvider,
+          );
+
+          return ListView(
+            shrinkWrap: true,
+            padding:
+                const EdgeInsets.all(
+              16,
+            ),
+            children: [
+              Padding(
+                padding:
+                    const EdgeInsets.only(
+                  bottom: 12,
+                ),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Participants',
+                        style: TextStyle(
+                          fontWeight:
+                              FontWeight.w800,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
+                    if (session.isOwner &&
+                        session
+                            .participants
+                            .isNotEmpty)
+                      TextButton.icon(
+                        onPressed: () {
+                          if (!_leaving &&
+                              !_minimizing) {
+                            session
+                                .toggleMuteAll();
+                          }
+                        },
+                        icon: Icon(
+                          session.allMuted
+                              ? Icons
+                                  .mic_rounded
+                              : Icons
+                                  .mic_off_rounded,
+                          size: 18,
+                        ),
+                        label: Text(
+                          session.allMuted
+                              ? 'Unmute all'
+                              : 'Mute all',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              ...session
+                  .participants
+                  .entries
+                  .map(
+                (entry) => ListTile(
+                  leading:
+                      const Icon(
+                    Icons
+                        .person_rounded,
+                  ),
+                  title:
+                      Text(entry.value),
+                  trailing:
+                      session.isOwner
+                          ? IconButton(
+                              icon:
+                                  const Icon(
+                                Icons
+                                    .mic_off_rounded,
+                              ),
+                              tooltip:
+                                  'Mute',
+                              onPressed:
+                                  _leaving ||
+                                          _minimizing
+                                      ? null
+                                      : () =>
+                                          session
+                                              .muteParticipant(
+                                            entry.key,
+                                          ),
+                            )
+                          : null,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // BUILD
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    final session =
+        ref.watch(
+      dailyCallSessionProvider,
+    );
+
+    return PopScope(
+      // Never let Flutter automatically pop this route.
+      //
+      // We explicitly pop after Daily cleanup for a real hang-up.
+      canPop: false,
+
+      onPopInvokedWithResult:
+          (didPop, result) {
+        // IMPORTANT:
+        //
+        // _minimizing means this pop was intentionally
+        // caused by the minimize button.
+        //
+        // Therefore NEVER call Daily leave here.
+        if (_minimizing) {
+          return;
+        }
+
+        if (didPop ||
+            _leaving) {
+          return;
+        }
+
+        _leave();
+      },
+
+      child: Scaffold(
+        backgroundColor:
+            Colors.black,
+
+        body: SafeArea(
+          child: _joining
+              ? Stack(
+                  children: [
+                    const Center(
+                      child:
+                          CircularProgressIndicator(
+                        color:
+                            Colors.white,
+                      ),
+                    ),
+
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child:
+                          TextButton.icon(
+                        onPressed:
+                            _leaving
+                                ? null
+                                : _leave,
+                        style:
+                            TextButton
+                                .styleFrom(
+                          foregroundColor:
+                              Colors.white70,
+                        ),
+                        icon:
+                            const Icon(
+                          Icons
+                              .arrow_back_rounded,
+                          size: 18,
+                        ),
+                        label:
+                            const Text(
+                          'Cancel',
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : _errorMessage != null
+                  ? Center(
+                      child:
+                          Padding(
+                        padding:
+                            const EdgeInsets
+                                .all(
+                          24,
+                        ),
+                        child:
+                            Column(
+                          mainAxisSize:
+                              MainAxisSize
+                                  .min,
+                          children: [
+                            Icon(
+                              _permissionPermanentlyDenied
+                                  ? Icons
+                                      .videocam_off_rounded
+                                  : Icons
+                                      .wifi_off_rounded,
+                              color:
+                                  Colors.white54,
+                              size: 48,
+                            ),
+
+                            const SizedBox(
+                              height: 16,
+                            ),
+
+                            Text(
+                              _errorMessage!,
+                              style:
+                                  const TextStyle(
+                                color:
+                                    Colors.white,
+                              ),
+                              textAlign:
+                                  TextAlign
+                                      .center,
+                            ),
+
+                            const SizedBox(
+                              height: 24,
+                            ),
+
+                            Row(
+                              mainAxisSize:
+                                  MainAxisSize
+                                      .min,
+                              children: [
+                                OutlinedButton(
+                                  onPressed:
+                                      _leave,
+                                  style:
+                                      OutlinedButton
+                                          .styleFrom(
+                                    foregroundColor:
+                                        Colors.white,
+                                    side:
+                                        const BorderSide(
+                                      color:
+                                          Colors.white54,
+                                    ),
+                                  ),
+                                  child:
+                                      const Text(
+                                    'Close',
+                                  ),
+                                ),
+
+                                const SizedBox(
+                                  width: 12,
+                                ),
+
+                                FilledButton(
+                                  onPressed:
+                                      _starting ||
+                                              _leaving
+                                          ? null
+                                          : _permissionPermanentlyDenied
+                                              ? () => CallPermissions
+                                                  .openSettings()
+                                              : () {
+                                                  setState(
+                                                    () {
+                                                      _errorMessage =
+                                                          null;
+                                                      _joining =
+                                                          true;
+                                                    },
+                                                  );
+
+                                                  WidgetsBinding
+                                                      .instance
+                                                      .addPostFrameCallback(
+                                                    (_) {
+                                                      if (mounted &&
+                                                          !_leaving) {
+                                                        _ensureJoined();
+                                                      }
+                                                    },
+                                                  );
+                                                },
+                                  child: Text(
+                                    _permissionPermanentlyDenied
+                                        ? 'Open settings'
+                                        : 'Try again',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : _leaving
+                      ? const ColoredBox(
+                          color:
+                              Colors.black,
+                        )
+                      : Builder(
+                          builder:
+                              (context) {
+                            if (!_leaving) {
+                              _syncVideoTrack(
+                                session,
+                              );
+
+                              _syncRemoteControllers(
+                                session,
+                              );
+                            }
+
+                            final mainRemote =
+                                _mainRemoteParticipant(
+                              session,
+                            );
+
+                            return Stack(
+                              children: [
+                                // ------------------------------------------------
+                                // MAIN VIDEO
+                                // ------------------------------------------------
+
+                                if (!_leaving &&
+                                    session.client !=
+                                        null)
+                                  Positioned.fill(
+                                    child:
+                                        mainRemote !=
+                                                null
+                                            ? _remoteVideoTile(
+                                                mainRemote.key,
+                                                mainRemote.value,
+                                              )
+                                            : _localVideoTile(
+                                                session,
+                                              ),
+                                  ),
+
+                                // ------------------------------------------------
+                                // MICROPHONE STATUS
+                                // ------------------------------------------------
+
+                                if (!_leaving &&
+                                    session.client !=
+                                        null)
+                                  Positioned(
+                                    left: 16,
+                                    bottom: 112,
+                                    child: Row(
+                                      mainAxisSize:
+                                          MainAxisSize.min,
+                                      children: [
+                                        if (mainRemote
+                                                ?.value
+                                                .isMicrophoneMuted ??
+                                            !session
+                                                .micEnabled)
+                                          Container(
+                                            padding:
+                                                const EdgeInsets.all(
+                                              6,
+                                            ),
+                                            decoration:
+                                                const BoxDecoration(
+                                              color:
+                                                  Colors.black45,
+                                              shape:
+                                                  BoxShape.circle,
+                                            ),
+                                            child:
+                                                const Icon(
+                                              Icons
+                                                  .mic_off_rounded,
+                                              color:
+                                                  Colors.white,
+                                              size:
+                                                  16,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+
+                                // ------------------------------------------------
+                                // THUMBNAILS
+                                // ------------------------------------------------
+
+                                if (!_leaving &&
+                                    session.client !=
+                                        null)
+                                  Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 96,
+                                    child:
+                                        _thumbnailStrip(
+                                      session,
+                                      mainRemote
+                                          ?.key,
+                                    ),
+                                  ),
+
+                                // ------------------------------------------------
+                                // TOP BAR
+                                // ------------------------------------------------
+
+                                Positioned(
+                                  top: 12,
+                                  left: 16,
+                                  right: 16,
+                                  child: Row(
+                                    children: [
+                                      IconButton(
+                                        icon:
+                                            const Icon(
+                                          Icons
+                                              .keyboard_arrow_down_rounded,
+                                          color:
+                                              Colors.white,
+                                        ),
+                                        tooltip:
+                                            'Minimize',
+                                        onPressed:
+                                            _leaving ||
+                                                    _minimizing
+                                                ? null
+                                                : _minimize,
+                                      ),
+
+                                      Expanded(
+                                        child:
+                                            Text(
+                                          widget
+                                              .liveClassTitle,
+                                          style:
+                                              const TextStyle(
+                                            color:
+                                                Colors.white,
+                                            fontWeight:
+                                                FontWeight.w700,
+                                          ),
+                                          overflow:
+                                              TextOverflow
+                                                  .ellipsis,
+                                        ),
+                                      ),
+
+                                      IconButton(
+                                        icon:
+                                            Icon(
+                                          _immersive
+                                              ? Icons
+                                                  .fullscreen_exit_rounded
+                                              : Icons
+                                                  .fullscreen_rounded,
+                                          color:
+                                              Colors.white,
+                                        ),
+                                        tooltip:
+                                            _immersive
+                                                ? 'Exit fullscreen'
+                                                : 'Fullscreen',
+                                        onPressed:
+                                            _leaving ||
+                                                    _minimizing
+                                                ? null
+                                                : _toggleFullscreen,
+                                      ),
+
+                                      if (session
+                                          .isOwner)
+                                        IconButton(
+                                          icon:
+                                              const Icon(
+                                            Icons
+                                                .people_alt_rounded,
+                                            color:
+                                                Colors.white,
+                                          ),
+                                          onPressed:
+                                              _leaving ||
+                                                      _minimizing
+                                                  ? null
+                                                  : _openParticipants,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+
+                                // ------------------------------------------------
+                                // RAISED HANDS
+                                // ------------------------------------------------
+
+                                if (!_leaving &&
+                                    session
+                                        .raisedHands
+                                        .isNotEmpty)
+                                  Positioned(
+                                    top: 56,
+                                    left: 16,
+                                    right: 16,
+                                    child:
+                                        Wrap(
+                                      spacing: 6,
+                                      runSpacing:
+                                          6,
+                                      children:
+                                          session
+                                              .raisedHands
+                                              .map(
+                                        (entry) =>
+                                            Chip(
+                                          backgroundColor:
+                                              AppColors.accent,
+                                          label:
+                                              Text(
+                                            entry.userName,
+                                            style:
+                                                const TextStyle(
+                                              color:
+                                                  Colors.white,
+                                              fontSize:
+                                                  12,
+                                            ),
+                                          ),
+                                          avatar:
+                                              const Icon(
+                                            Icons
+                                                .back_hand_rounded,
+                                            color:
+                                                Colors.white,
+                                            size:
+                                                16,
+                                          ),
+                                          onDeleted:
+                                              session.isOwner &&
+                                                      !_leaving &&
+                                                      !_minimizing
+                                                  ? () =>
+                                                      session.lowerHand(
+                                                        entry.userId,
+                                                      )
+                                                  : null,
+                                          deleteIcon:
+                                              session.isOwner
+                                                  ? const Icon(
+                                                      Icons
+                                                          .close_rounded,
+                                                      color:
+                                                          Colors.white,
+                                                      size:
+                                                          16,
+                                                    )
+                                                  : null,
+                                        ),
+                                      )
+                                              .toList(),
+                                    ),
+                                  ),
+
+                                // ------------------------------------------------
+                                // CHAT
+                                // ------------------------------------------------
+
+                                Positioned(
+                                  right: 16,
+                                  bottom: 100,
+                                  child:
+                                      FloatingActionButton(
+                                    heroTag:
+                                        'live-class-chat-fab',
+                                    backgroundColor:
+                                        AppColors.primary,
+                                    onPressed:
+                                        _leaving ||
+                                                _minimizing
+                                            ? null
+                                            : _openAppChat,
+                                    child:
+                                        const Icon(
+                                      Icons
+                                          .chat_bubble_rounded,
+                                      color:
+                                          Colors.white,
+                                    ),
+                                  ),
+                                ),
+                                // ------------------------------------------------
+                                // BOTTOM CONTROLS
+                                // ------------------------------------------------
+
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 24,
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment
+                                            .center,
+                                    children: [
+                                      _CallControlButton(
+                                        icon: session
+                                                .micEnabled
+                                            ? Icons
+                                                .mic_rounded
+                                            : Icons
+                                                .mic_off_rounded,
+                                        onPressed:
+                                            _leaving ||
+                                                    _minimizing
+                                                ? null
+                                                : () =>
+                                                    session.toggleMic(),
+                                      ),
+
+                                      const SizedBox(
+                                        width: 16,
+                                      ),
+
+                                      _CallControlButton(
+                                        icon: session
+                                                .cameraEnabled
+                                            ? Icons
+                                                .videocam_rounded
+                                            : Icons
+                                                .videocam_off_rounded,
+                                        onPressed:
+                                            _leaving ||
+                                                    _minimizing
+                                                ? null
+                                                : () =>
+                                                    session.toggleCamera(),
+                                      ),
+
+                                      const SizedBox(
+                                        width: 16,
+                                      ),
+
+                                      _CallControlButton(
+                                        icon: Icons
+                                            .cameraswitch_rounded,
+                                        onPressed:
+                                            _leaving ||
+                                                    _minimizing
+                                                ? null
+                                                : _flipCamera,
+                                      ),
+
+                                      const SizedBox(
+                                        width: 16,
+                                      ),
+
+                                      // ------------------------------------------------
+                                      // HANG UP
+                                      // ------------------------------------------------
+
+                                      _CallControlButton(
+                                        icon: Icons
+                                            .call_end_rounded,
+                                        color:
+                                            AppColors.error,
+                                        onPressed:
+                                            _leaving ||
+                                                    _minimizing
+                                                ? null
+                                                : _leave,
+                                      ),
+
+                                      if (!session
+                                          .isOwner) ...[
+                                        const SizedBox(
+                                          width: 16,
+                                        ),
+
+                                        _CallControlButton(
+                                          icon: Icons
+                                              .back_hand_rounded,
+                                          color: session
+                                                  .myHandRaised
+                                              ? AppColors
+                                                  .accent
+                                              : null,
+                                          onPressed:
+                                              _leaving ||
+                                                      _minimizing
+                                                  ? null
+                                                  : () =>
+                                                      session.toggleMyHand(),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// CALL CONTROL BUTTON
+// -----------------------------------------------------------------------------
+
+class _CallControlButton
+    extends StatelessWidget {
+  const _CallControlButton({
+    required this.icon,
+    required this.onPressed,
+    this.color,
+  });
+
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final Color? color;
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    return CircleAvatar(
+      radius: 28,
+      backgroundColor:
+          color ?? Colors.white24,
+      child: IconButton(
+        icon: Icon(
+          icon,
+          color: Colors.white,
+        ),
+        onPressed: onPressed,
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// REST-BACKED LIVE CLASS CHAT
+// -----------------------------------------------------------------------------
+
+class _LiveClassChatSheet
+    extends ConsumerStatefulWidget {
+  const _LiveClassChatSheet({
+    required this.liveClassId,
+  });
+
+  final String liveClassId;
+
+  @override
+  ConsumerState<
+      _LiveClassChatSheet> createState() =>
+      _LiveClassChatSheetState();
+}
+
+class _LiveClassChatSheetState
+    extends ConsumerState<
+        _LiveClassChatSheet> {
+  final _controller =
+      TextEditingController();
+
+  bool _sending = false;
+
+  Timer? _pollTimer;
+
+  ScrollController?
+      _chatScrollController;
+
+  int _lastMessageCount = 0;
+
+  void _scrollToBottom() {
+    final controller =
+        _chatScrollController;
+
+    if (controller == null ||
+        !controller.hasClients) {
+      return;
+    }
+
+    controller.animateTo(
+      controller.position
+          .maxScrollExtent,
+      duration:
+          const Duration(
+        milliseconds: 250,
+      ),
+      curve: Curves.easeOut,
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    _pollTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) {
+        if (mounted) {
+          ref.invalidate(
+            liveChatProvider(
+              widget.liveClassId,
+            ),
+          );
+        }
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+
+    _controller.dispose();
+
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final text =
+        _controller.text.trim();
+
+    if (text.isEmpty ||
+        _sending ||
+        !mounted) {
+      return;
+    }
+
+    setState(() {
+      _sending = true;
+    });
+
+    try {
+      await ref
+          .read(
+            liveClassRepositoryProvider,
+          )
+          .sendLiveChat(
+            liveClassId:
+                widget.liveClassId,
+            message: text,
+          );
+
+      if (!mounted) {
+        return;
+      }
+
+      _controller.clear();
+
+      ref.invalidate(
+        liveChatProvider(
+          widget.liveClassId,
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not send message: $e',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _sending = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(
+    BuildContext context,
+  ) {
+    final chatAsync =
+        ref.watch(
+      liveChatProvider(
+        widget.liveClassId,
+      ),
+    );
+
+    final user =
+        ref.watch(authProvider).user;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      minChildSize: 0.4,
+      maxChildSize: 0.95,
+      expand: false,
+      builder:
+          (
+        context,
+        scrollController,
+      ) {
+        _chatScrollController =
+            scrollController;
+
+        return Padding(
+          padding:
+              EdgeInsets.only(
+            bottom: MediaQuery.of(
+              context,
+            ).viewInsets.bottom,
+          ),
+          child: Container(
+            decoration:
+                const BoxDecoration(
+              color:
+                  AppColors.cardLight,
+              borderRadius:
+                  BorderRadius.vertical(
+                top: Radius.circular(
+                  20,
+                ),
+              ),
+            ),
+            child: Column(
+              children: [
+                const SizedBox(
+                  height: 10,
+                ),
+
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration:
+                      BoxDecoration(
+                    color:
+                        AppColors.border,
+                    borderRadius:
+                        BorderRadius.circular(
+                      2,
+                    ),
+                  ),
+                ),
+
+                const Padding(
+                  padding:
+                      EdgeInsets.all(12),
+                  child: Text(
+                    'Class chat',
+                    style: TextStyle(
+                      fontWeight:
+                          FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+
+                Expanded(
+                  child: chatAsync.when(
+                    data: (messages) {
+                      if (messages.length >
+                          _lastMessageCount) {
+                        _lastMessageCount =
+                            messages.length;
+
+                        WidgetsBinding
+                            .instance
+                            .addPostFrameCallback(
+                          (_) =>
+                              _scrollToBottom(),
+                        );
+                      }
+
+                      return ListView
+                          .builder(
+                        controller:
+                            scrollController,
+                        padding:
+                            const EdgeInsets
+                                .symmetric(
+                          horizontal: 16,
+                        ),
+                        itemCount:
+                            messages.length,
+                        itemBuilder:
+                            (
+                          context,
+                          index,
+                        ) {
+                          final msg =
+                              messages[index];
+
+                          final isMine =
+                              msg.userId ==
+                                  user?.id;
+
+                          return Align(
+                            alignment:
+                                isMine
+                                    ? Alignment
+                                        .centerRight
+                                    : Alignment
+                                        .centerLeft,
+                            child:
+                                Container(
+                              margin:
+                                  const EdgeInsets
+                                      .only(
+                                bottom: 8,
+                              ),
+                              padding:
+                                  const EdgeInsets
+                                      .symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              decoration:
+                                  BoxDecoration(
+                                color: isMine
+                                    ? AppColors
+                                        .primary
+                                    : AppColors
+                                        .surfaceLight,
+                                borderRadius:
+                                    BorderRadius
+                                        .circular(
+                                  14,
+                                ),
+                              ),
+                              child: Text(
+                                msg.message,
+                                style:
+                                    TextStyle(
+                                  color: isMine
+                                      ? Colors
+                                          .white
+                                      : AppColors
+                                          .textPrimary,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                    loading: () =>
+                        const Center(
+                      child:
+                          CircularProgressIndicator(),
+                    ),
+                    error: (
+                      e,
+                      __,
+                    ) =>
+                        Center(
+                      child: Text(
+                        '$e',
+                      ),
+                    ),
+                  ),
+                ),
+
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.all(
+                      12,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child:
+                              TextField(
+                            controller:
+                                _controller,
+                            decoration:
+                                const InputDecoration(
+                              hintText:
+                                  'Message the class...',
+                            ),
+                            onSubmitted:
+                                (_) =>
+                                    _send(),
+                          ),
+                        ),
+
+                        const SizedBox(
+                          width: 8,
+                        ),
+
+                        IconButton.filled(
+                          onPressed:
+                              _sending
+                                  ? null
+                                  : _send,
+                          icon:
+                              const Icon(
+                            Icons
+                                .send_rounded,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
