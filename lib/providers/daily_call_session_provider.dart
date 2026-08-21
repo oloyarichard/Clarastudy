@@ -10,22 +10,59 @@ import '../data/live_class_repository.dart';
 import '../models/live_class_models.dart';
 import 'core_providers.dart';
 
-/// Owns the one and only native Daily [CallClient] for the whole app.
+/// Owns the Daily [CallClient] for the whole app.
 ///
-/// Lifecycle rules (do not break these):
-///  * Runtime camera/mic permission is checked BEFORE CallClient.create().
+/// CRITICAL LIFECYCLE DECISION — read before changing this file:
+///
+/// Daily's own reference app (daily-flutter-demo, daily-co/daily-flutter-demo
+/// on GitHub) creates exactly ONE CallClient for the entire app session, at
+/// startup, and never disposes it until the app itself shuts down. Leaving a
+/// call is `client.leave()`. Joining the next one is `client.join()` on that
+/// SAME instance. `CallClient.dispose()` is called exactly once, ever.
+///
+/// This provider used to call `CallClient.create()` fresh for every class and
+/// `.dispose()` it on every hang-up. That create-then-dispose-then-create
+/// cycle is NOT the pattern the SDK is built and tested around, and it is
+/// the actual cause of the delayed crash after hang-up: popping the call
+/// screen would succeed, then a moment later — while `dispose()` ran on the
+/// native client in the background — the app would crash. Repeated
+/// create()/dispose() cycling of the native object is what triggered it.
+///
+/// The fix: create the client ONCE (lazily, on first use — Daily's demo can
+/// create it at main() because it has permission by then; we can't assume
+/// that, so we create it on the first `start()` call instead) and reuse it
+/// for every class via leave()/join(). Never dispose it between calls.
+///
+/// Other lifecycle rules (still true):
+///  * Runtime camera/mic permission is checked BEFORE the client is used.
 ///  * Every VideoViewController that renders a Daily track must register a
-///    release callback here, so tracks are detached BEFORE native dispose().
-///    Disposing the native client while a renderer still holds a track is a
-///    use-after-free and takes the whole app down.
-///  * Native leave/dispose is time-boxed — a wedged native call must never
-///    wedge the Dart side.
+///    release callback here, so tracks are detached BEFORE the client
+///    leaves the room — disposing/leaving while a renderer still holds a
+///    track is a use-after-free.
+///  * Native leave is time-boxed — a wedged native call must never wedge
+///    the Dart side.
 class DailyCallSession extends ChangeNotifier {
   DailyCallSession(this._repository);
 
   final LiveClassRepository _repository;
 
-  CallClient? client;
+  // Created once, lazily, on the first start(). Reused for every call via
+  // leave()/join(). Only ever disposed in this provider's own dispose(),
+  // which in practice means "the app is shutting down."
+  CallClient? _persistentClient;
+
+  // True only while actually joined to a room. `client` below is exposed
+  // as null whenever this is false, so every existing check in the UI
+  // (`session.client != null`, `session.hasActiveCall`) keeps working
+  // exactly as before even though the underlying CallClient object now
+  // persists across calls.
+  bool _inCall = false;
+
+  /// Public view of the client — null unless actually in a call, even
+  /// though the real CallClient underneath may already exist from a
+  /// previous call. Every existing UI reference to `session.client`
+  /// continues to behave identically to before this rewrite.
+  CallClient? get client => _inCall ? _persistentClient : null;
 
   String? liveClassId;
   String? liveClassTitle;
@@ -42,7 +79,7 @@ class DailyCallSession extends ChangeNotifier {
 
   StreamSubscription<Event>? _eventSubscription;
 
-  // Only one native leave/dispose operation may run at once.
+  // Only one leave operation may run at once.
   Future<void>? _leaveOperation;
 
   List<RaisedHandEntry> raisedHands = [];
@@ -53,14 +90,21 @@ class DailyCallSession extends ChangeNotifier {
 
   bool _disposed = false;
 
+  // Bumped by leave() (and by a new start()). A join in flight checks this
+  // after every await — if it changed underneath it, that join has been
+  // superseded and must leave the room it may have half-joined instead of
+  // presenting it as active. This is what protects hang-up/cancel tapped
+  // while the call is still connecting.
+  int _joinGeneration = 0;
+
   /// Views register a callback that detaches their VideoViewControllers from
-  /// Daily tracks. Invoked immediately before the native client is destroyed.
+  /// Daily tracks. Invoked immediately before the client leaves the room.
   final Set<VoidCallback> _trackReleaseCallbacks = <VoidCallback>{};
 
-  bool get hasActiveCall => client != null;
+  bool get hasActiveCall => _inCall;
 
-  /// True while the native client is being torn down. Views should stop
-  /// touching tracks entirely once this flips.
+  /// True while a leave is in progress. Views should stop touching tracks
+  /// entirely once this flips.
   bool get isTearingDown => _leaveOperation != null;
 
   void addTrackReleaseCallback(VoidCallback callback) {
@@ -88,6 +132,16 @@ class DailyCallSession extends ChangeNotifier {
     super.notifyListeners();
   }
 
+  /// Returns the one persistent CallClient, creating it on first use.
+  Future<CallClient> _ensureClient() async {
+    final existing = _persistentClient;
+    if (existing != null) return existing;
+
+    final created = await CallClient.create();
+    _persistentClient = created;
+    return created;
+  }
+
   // --------------------------------------------------------------------------
   // START
   // --------------------------------------------------------------------------
@@ -98,18 +152,18 @@ class DailyCallSession extends ChangeNotifier {
     required DailyCallCredentials credentials,
     required String? currentUserId,
   }) async {
-    // Permission FIRST. Daily does not ask on your behalf, and creating a
+    // Permission FIRST. Daily does not ask on your behalf, and using the
     // client without camera/mic access is what kills the app on the very
     // first call.
     await CallPermissions.ensureGranted();
 
-    // If another leave is still shutting down the native client, wait it out.
+    // If a leave is still in progress, wait it out.
     if (_leaveOperation != null) {
       await _leaveOperation;
     }
 
-    // Never have two Daily clients active.
-    if (client != null) {
+    // Never be "in" two calls at once — leave the current room first.
+    if (_inCall) {
       await leave();
     }
 
@@ -132,22 +186,32 @@ class DailyCallSession extends ChangeNotifier {
 
     _currentUserId = currentUserId;
 
+    // Claim this join attempt. Any leave() (including one that races in
+    // while we're still awaiting below) bumps this and makes our attempt
+    // stale.
+    final myGeneration = ++_joinGeneration;
+
     notifyListeners();
 
     const maxAttempts = 2;
 
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        await _attemptJoin(credentials, currentUserId);
+        await _attemptJoin(credentials, currentUserId, myGeneration);
         return;
       } catch (e) {
         final isLastAttempt = attempt == maxAttempts;
 
-        await _teardownFailedClient();
+        await _teardownFailedJoin();
 
         if (isLastAttempt) {
           _reset();
           rethrow;
+        }
+
+        // A superseded join (leave() raced in) should not blindly retry.
+        if (myGeneration != _joinGeneration) {
+          return;
         }
 
         await Future<void>.delayed(const Duration(milliseconds: 800));
@@ -158,21 +222,41 @@ class DailyCallSession extends ChangeNotifier {
   Future<void> _attemptJoin(
     DailyCallCredentials credentials,
     String? currentUserId,
+    int myGeneration,
   ) async {
-    final newClient = await CallClient.create();
+    final callClient = await _ensureClient();
 
-    client = newClient;
+    // If leave() (or a newer start()) ran while we were awaiting
+    // CallClient creation/reuse, this attempt is stale.
+    if (myGeneration != _joinGeneration) {
+      throw StateError('Join superseded by leave()');
+    }
 
-    _eventSubscription = newClient.events.listen(
+    _eventSubscription = callClient.events.listen(
       (event) => _handleEvent(event, currentUserId),
     );
 
-    await newClient.join(
+    await callClient.join(
       url: Uri.parse(credentials.roomUrl),
       token: credentials.token,
     );
 
-    await newClient.updateInputs(
+    if (myGeneration != _joinGeneration) {
+      await _eventSubscription?.cancel();
+      _eventSubscription = null;
+
+      // We half-joined a room nobody wants anymore — leave it, but the
+      // CLIENT itself stays alive for whatever join comes next.
+      try {
+        await callClient.leave().timeout(const Duration(seconds: 5));
+      } catch (e) {
+        debugPrint('Leave (superseded join) error: $e');
+      }
+
+      throw StateError('Join superseded by leave()');
+    }
+
+    await callClient.updateInputs(
       inputs: const InputSettingsUpdate.set(
         camera: CameraInputSettingsUpdate.set(
           isEnabled: BoolUpdate.set(true),
@@ -182,6 +266,21 @@ class DailyCallSession extends ChangeNotifier {
         ),
       ),
     );
+
+    if (myGeneration != _joinGeneration) {
+      await _eventSubscription?.cancel();
+      _eventSubscription = null;
+
+      try {
+        await callClient.leave().timeout(const Duration(seconds: 5));
+      } catch (e) {
+        debugPrint('Leave (superseded join) error: $e');
+      }
+
+      throw StateError('Join superseded by leave()');
+    }
+
+    _inCall = true;
 
     _handsPollTimer?.cancel();
 
@@ -193,39 +292,28 @@ class DailyCallSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _teardownFailedClient() async {
+  Future<void> _teardownFailedJoin() async {
     await _eventSubscription?.cancel();
     _eventSubscription = null;
 
     _handsPollTimer?.cancel();
     _handsPollTimer = null;
 
-    final failedClient = client;
-
     _releaseAllTracks();
 
-    client = null;
+    _inCall = false;
 
     notifyListeners();
 
-    if (failedClient == null) return;
-
-    await _destroyClient(failedClient);
-  }
-
-  /// Native leave + dispose, each time-boxed so a hung native call can never
-  /// wedge the app. This is the difference between "hang up" and "hangs".
-  Future<void> _destroyClient(CallClient target) async {
-    try {
-      await target.leave().timeout(const Duration(seconds: 5));
-    } catch (e) {
-      debugPrint('Daily client leave error: $e');
-    }
+    // Leave whatever room we may have half-joined — the client itself
+    // stays alive for the retry (or for whatever the caller does next).
+    final callClient = _persistentClient;
+    if (callClient == null) return;
 
     try {
-      await target.dispose().timeout(const Duration(seconds: 5));
+      await callClient.leave().timeout(const Duration(seconds: 5));
     } catch (e) {
-      debugPrint('Daily client dispose error: $e');
+      debugPrint('Leave (failed join cleanup) error: $e');
     }
   }
 
@@ -236,14 +324,14 @@ class DailyCallSession extends ChangeNotifier {
   Future<void> _pollRaisedHands() async {
     final id = liveClassId;
 
-    if (id == null || client == null || _leaveOperation != null) {
+    if (id == null || !_inCall || _leaveOperation != null) {
       return;
     }
 
     try {
       final fresh = await _repository.getRaisedHands(id);
 
-      if (client == null || _leaveOperation != null) return;
+      if (!_inCall || _leaveOperation != null) return;
 
       final previousIds = raisedHands.map((h) => h.userId).toSet();
       final freshIds = fresh.map((h) => h.userId).toSet();
@@ -263,7 +351,7 @@ class DailyCallSession extends ChangeNotifier {
 
       // Only rebuild the UI when something actually changed. This poll used
       // to notify every 2s, rebuilding the call screen and the bubble
-      // constantly — a real source of the switching jank.
+      // constantly — a real source of switching jank.
       final unchanged = previousIds.length == freshIds.length &&
           previousIds.containsAll(freshIds) &&
           myHandRaised == nextMyHandRaised;
@@ -282,7 +370,7 @@ class DailyCallSession extends ChangeNotifier {
   Future<void> toggleMyHand() async {
     final id = liveClassId;
 
-    if (id == null || client == null || _leaveOperation != null) return;
+    if (id == null || !_inCall || _leaveOperation != null) return;
 
     try {
       myHandRaised = await _repository.toggleRaisedHand(id);
@@ -294,7 +382,7 @@ class DailyCallSession extends ChangeNotifier {
   Future<void> lowerHand(String userId) async {
     final id = liveClassId;
 
-    if (id == null || !isOwner || client == null || _leaveOperation != null) {
+    if (id == null || !isOwner || !_inCall || _leaveOperation != null) {
       return;
     }
 
@@ -344,10 +432,9 @@ class DailyCallSession extends ChangeNotifier {
       callStateUpdated: (stateData) {
         if (stateData.state == CallState.left) {
           // The call ended from the outside (host ended the meeting, we were
-          // ejected, network gave up). The old code just nulled the client
-          // and LEAKED it — the native object stayed alive holding the
-          // camera, so the *next* CallClient.create() fought with a zombie.
-          // Tear it down properly instead.
+          // ejected, network gave up). Leave cleanly on our side too — but
+          // the underlying client object is left alone, ready for the next
+          // join.
           if (_leaveOperation == null) {
             unawaited(leave());
           }
@@ -367,13 +454,13 @@ class DailyCallSession extends ChangeNotifier {
   // --------------------------------------------------------------------------
 
   void minimize() {
-    if (client == null || isMinimized) return;
+    if (!_inCall || isMinimized) return;
     isMinimized = true;
     notifyListeners();
   }
 
   void maximize() {
-    if (client == null || !isMinimized) return;
+    if (!_inCall || !isMinimized) return;
     isMinimized = false;
     notifyListeners();
   }
@@ -502,7 +589,11 @@ class DailyCallSession extends ChangeNotifier {
   // --------------------------------------------------------------------------
 
   /// Idempotent. If the full screen and the bubble both hang up at the same
-  /// instant, they share ONE leave and ONE dispose.
+  /// instant, they share ONE leave.
+  ///
+  /// IMPORTANT: this leaves the ROOM. It does NOT dispose the CallClient —
+  /// the client is reused for the next call. See the class doc comment for
+  /// why that distinction is the actual fix for the crash-after-hang-up bug.
   Future<void> leave() {
     final existing = _leaveOperation;
     if (existing != null) return existing;
@@ -521,7 +612,8 @@ class DailyCallSession extends ChangeNotifier {
   }
 
   Future<void> _performLeave() async {
-    final clientToLeave = client;
+    final callClient = _persistentClient;
+    final wasInCall = _inCall;
 
     // 1. Stop Daily callbacks.
     await _eventSubscription?.cancel();
@@ -531,14 +623,14 @@ class DailyCallSession extends ChangeNotifier {
     _handsPollTimer?.cancel();
     _handsPollTimer = null;
 
-    // 3. Detach every renderer from its track BEFORE the native client dies.
-    //    This is the step that was missing. Nulling `client` hides the
-    //    VideoView widgets, but the VideoViewControllers were still holding
-    //    native track handles when dispose() ran underneath them.
+    // 3. Detach every renderer from its track BEFORE the client leaves the
+    //    room. Nulling `_inCall` hides the VideoView widgets, but the
+    //    VideoViewControllers were still holding native track handles if
+    //    this step was skipped.
     _releaseAllTracks();
 
-    // 4. Now drop the client reference so no widget can re-attach.
-    client = null;
+    // 4. Now flip the flag so no widget can re-attach or think it's live.
+    _inCall = false;
     isMinimized = false;
     participants.clear();
     raisedHands = [];
@@ -551,12 +643,19 @@ class DailyCallSession extends ChangeNotifier {
     //    deadline rather than awaited blindly.
     await _nextFrame();
 
-    if (clientToLeave == null) {
+    if (!wasInCall || callClient == null) {
       _reset();
       return;
     }
 
-    await _destroyClient(clientToLeave);
+    // 6. Leave the room. The CallClient object itself is deliberately NOT
+    //    disposed — it stays alive, ready for the next join(). Time-boxed
+    //    so a wedged native call can never wedge the app.
+    try {
+      await callClient.leave().timeout(const Duration(seconds: 5));
+    } catch (e) {
+      debugPrint('Daily client leave error: $e');
+    }
 
     _reset();
   }
@@ -575,7 +674,7 @@ class DailyCallSession extends ChangeNotifier {
   // --------------------------------------------------------------------------
 
   void _reset() {
-    client = null;
+    _inCall = false;
 
     liveClassId = null;
     liveClassTitle = null;
@@ -596,6 +695,9 @@ class DailyCallSession extends ChangeNotifier {
 
   @override
   void dispose() {
+    // This is genuine app shutdown — the one place the persistent client
+    // actually gets disposed, matching Daily's own reference app calling
+    // dispose() exactly once, at the very end of the app's life.
     _disposed = true;
 
     _handsPollTimer?.cancel();
@@ -609,12 +711,12 @@ class DailyCallSession extends ChangeNotifier {
 
     _trackReleaseCallbacks.clear();
 
-    final orphan = client;
-    client = null;
+    final callClient = _persistentClient;
+    _persistentClient = null;
+    _inCall = false;
 
-    if (orphan != null) {
-      // Provider is going away with a live call — don't leak the camera.
-      unawaited(_destroyClient(orphan));
+    if (callClient != null) {
+      unawaited(callClient.dispose());
     }
 
     super.dispose();
