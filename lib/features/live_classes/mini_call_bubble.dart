@@ -23,7 +23,8 @@ class MiniCallBubble extends ConsumerStatefulWidget {
   ConsumerState<MiniCallBubble> createState() => _MiniCallBubbleState();
 }
 
-class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
+class _MiniCallBubbleState extends ConsumerState<MiniCallBubble>
+    with WidgetsBindingObserver {
   Offset _offset = const Offset(16, 100);
 
   final VideoViewController _videoController = VideoViewController();
@@ -37,6 +38,8 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
 
     // ref.read is safe here (unlike ref.watch, which needs build()).
     //
@@ -54,6 +57,7 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _session?.removeTrackReleaseCallback(_releaseTrack);
     _videoController.dispose();
     super.dispose();
@@ -69,6 +73,25 @@ class _MiniCallBubbleState extends ConsumerState<MiniCallBubble> {
     } catch (e) {
       debugPrint('Bubble track release failed: $e');
     }
+  }
+
+  /// Same reasoning as the full-screen call screen: the native texture a
+  /// video renderer draws into can go stale while the screen is off. If
+  /// the call is minimized to this bubble when that happens, this is the
+  /// renderer that needs the null -> real-track cycle on resume, not the
+  /// (currently not even mounted) full-screen one.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || _leaving) return;
+
+    try {
+      _videoController.setTrack(null);
+    } catch (e) {
+      debugPrint('Bubble track resync (detach) failed: $e');
+    }
+    _lastTrack = null;
+
+    if (mounted) setState(() {});
   }
 
   void _syncVideoTrack(DailyCallSession session) {
