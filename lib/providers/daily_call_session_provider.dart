@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:daily_flutter/daily_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../core/utils/call_permissions.dart';
 import '../core/utils/global_keys.dart';
@@ -282,6 +283,16 @@ class DailyCallSession extends ChangeNotifier {
 
     _inCall = true;
 
+    // Keep the screen from dimming/locking for as long as the call is
+    // actually live — a locked screen during a lesson is exactly the
+    // "phone went idle mid-call" problem. Paired with WakelockPlus.disable()
+    // everywhere the call ends (see _reset, _teardownFailedJoin, dispose).
+    unawaited(
+      WakelockPlus.enable().catchError((Object e, StackTrace stackTrace) {
+        debugPrint('Wakelock enable failed: $e');
+      }),
+    );
+
     _handsPollTimer?.cancel();
 
     _handsPollTimer = Timer.periodic(
@@ -303,10 +314,11 @@ class DailyCallSession extends ChangeNotifier {
 
     _inCall = false;
 
-    notifyListeners();
+    unawaited(WakelockPlus.disable().catchError((Object e, StackTrace stackTrace) {
+      debugPrint('Wakelock disable failed: $e');
+    }));
 
-    // Leave whatever room we may have half-joined — the client itself
-    // stays alive for the retry (or for whatever the caller does next).
+    notifyListeners();
     final callClient = _persistentClient;
     if (callClient == null) return;
 
@@ -394,8 +406,7 @@ class DailyCallSession extends ChangeNotifier {
 
   // --------------------------------------------------------------------------
   // EVENTS
-  // --------------------------------------------------------------------------
-
+  // ----------------------------------------------------------------------
   void _handleEvent(Event event, String? currentUserId) {
     // Once teardown starts, Daily callbacks must not touch our state.
     if (_leaveOperation != null || _disposed) return;
@@ -676,6 +687,10 @@ class DailyCallSession extends ChangeNotifier {
   void _reset() {
     _inCall = false;
 
+    unawaited(WakelockPlus.disable().catchError((Object e, StackTrace stackTrace) {
+      debugPrint('Wakelock disable failed: $e');
+    }));
+
     liveClassId = null;
     liveClassTitle = null;
 
@@ -714,6 +729,10 @@ class DailyCallSession extends ChangeNotifier {
     final callClient = _persistentClient;
     _persistentClient = null;
     _inCall = false;
+
+    unawaited(WakelockPlus.disable().catchError((Object e, StackTrace stackTrace) {
+      debugPrint('Wakelock disable failed: $e');
+    }));
 
     if (callClient != null) {
       unawaited(callClient.dispose());
