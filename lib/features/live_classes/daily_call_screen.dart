@@ -503,7 +503,8 @@ class _DailyCallScreenState
   }
 
   // ---------------------------------------------------------------------------
-  // VIDEO TRACKS// ---------------------------------------------------------------------------
+  // VIDEO TRACKS
+  // ---------------------------------------------------------------------------
 
   void _syncVideoTrack(
     DailyCallSession session,
@@ -1048,7 +1049,8 @@ class _DailyCallScreenState
   // BUILD
   // ---------------------------------------------------------------------------
 
-  @overrideWidget build(
+  @override
+  Widget build(
     BuildContext context,
   ) {
     final session =
@@ -1656,7 +1658,9 @@ class _DailyCallScreenState
 
 // -----------------------------------------------------------------------------
 // CALL CONTROL BUTTON
-// -----------------------------------------------------------------------------class _CallControlButton
+// -----------------------------------------------------------------------------
+
+class _CallControlButton
     extends StatelessWidget {
   const _CallControlButton({
     required this.icon,
