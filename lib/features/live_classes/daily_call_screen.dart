@@ -45,7 +45,8 @@ class DailyCallScreen extends ConsumerStatefulWidget {
 }
 
 class _DailyCallScreenState
-    extends ConsumerState<DailyCallScreen> {
+    extends ConsumerState<DailyCallScreen>
+    with WidgetsBindingObserver {
   bool _joining = true;
   bool _immersive = true;
   bool _leaving = false;
@@ -77,6 +78,8 @@ class _DailyCallScreenState
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
 
     _enterImmersive();
 
@@ -155,6 +158,8 @@ class _DailyCallScreenState
     // ref.read(dailyCallSessionProvider).client?.dispose()
     //
     // from here.
+    WidgetsBinding.instance.removeObserver(this);
+
     SystemChrome.setEnabledSystemUIMode(
       SystemUiMode.edgeToEdge,
     );
@@ -178,6 +183,51 @@ class _DailyCallScreenState
     _remoteLastTracks.clear();
 
     super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // APP LIFECYCLE
+  // ---------------------------------------------------------------------------
+
+  /// Android in particular can invalidate the native texture/surface a
+  /// video renderer is drawing into while the screen is off — coming back
+  /// from that with the SAME cached track reference left the frame frozen
+  /// or black, because _syncVideoTrack saw "no change" and skipped
+  /// re-attaching. Forcing a null -> real-track cycle on resume makes every
+  /// VideoViewController rebind to a fresh surface.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _forceVideoResync();
+    }
+  }
+
+  void _forceVideoResync() {
+    if (_leaving || !mounted) return;
+
+    try {
+      _videoController.setTrack(null);
+    } catch (e) {
+      debugPrint('Local track resync (detach) failed: $e');
+    }
+    _lastTrack = null;
+
+    for (final entry in _remoteControllers.entries) {
+      try {
+        entry.value.setTrack(null);
+      } catch (e) {
+        debugPrint('Remote track resync (detach) failed: $e');
+      }
+    }
+    for (final id in _remoteLastTracks.keys.toList()) {
+      _remoteLastTracks[id] = null;
+    }
+
+    // Triggers a rebuild; _syncVideoTrack/_syncRemoteControllers run
+    // during build and will see every current track as "changed" against
+    // the now-null cache above, so each gets re-attached to a fresh
+    // surface.
+    setState(() {});
   }
 
   // ---------------------------------------------------------------------------
@@ -453,8 +503,7 @@ class _DailyCallScreenState
   }
 
   // ---------------------------------------------------------------------------
-  // VIDEO TRACKS
-  // ---------------------------------------------------------------------------
+  // VIDEO TRACKS// ---------------------------------------------------------------------------
 
   void _syncVideoTrack(
     DailyCallSession session,
@@ -486,6 +535,7 @@ class _DailyCallScreenState
       }
     }
   }
+
   void _syncRemoteControllers(
     DailyCallSession session,
   ) {
@@ -998,8 +1048,7 @@ class _DailyCallScreenState
   // BUILD
   // ---------------------------------------------------------------------------
 
-  @override
-  Widget build(
+  @overrideWidget build(
     BuildContext context,
   ) {
     final session =
@@ -1488,6 +1537,7 @@ class _DailyCallScreenState
                                     ),
                                   ),
                                 ),
+
                                 // ------------------------------------------------
                                 // BOTTOM CONTROLS
                                 // ------------------------------------------------
@@ -1606,9 +1656,7 @@ class _DailyCallScreenState
 
 // -----------------------------------------------------------------------------
 // CALL CONTROL BUTTON
-// -----------------------------------------------------------------------------
-
-class _CallControlButton
+// -----------------------------------------------------------------------------class _CallControlButton
     extends StatelessWidget {
   const _CallControlButton({
     required this.icon,
