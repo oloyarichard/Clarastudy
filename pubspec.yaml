@@ -32,6 +32,7 @@ dependencies:
   # Live video (Daily.co, embedded in-app)
   daily_flutter: ^0.38.0
   permission_handler: ^11.3.1
+  wakelock_plus: ^1.4.0
 
   # UI
   google_fonts: ^6.2.1
